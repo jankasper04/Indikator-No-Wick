@@ -51,6 +51,8 @@ var g_EMA = "═══ EMA Trend Bars ═══"
 ema1 = input.int(34, minval=1, maxval=300, title="EMA Period", group=g_EMA)
 shema = input.bool(true, title="Show EMA Line?", group=g_EMA)
 showEmaBarColor = input.bool(true, title="Color Bars Based on EMA?", group=g_EMA)
+emaUpTrendColor = input.color(color.lime, title="Uptrend Bar Color", inline="EMA_COL", group=g_EMA)
+emaDownTrendColor = input.color(color.red, title="Downtrend Bar Color", inline="EMA_COL", group=g_EMA)
 
 
 // ============================================================================
@@ -311,7 +313,7 @@ emaUpColor = hlc3 >= usedEma
 emaDownColor = hlc3 < usedEma
 
 // Plot EMA line with dynamic color
-emaColor = hlc3 >= usedEma ? color.lime : hlc3 < usedEma ? color.red : color.white
+emaColor = hlc3 >= usedEma ? emaUpTrendColor : hlc3 < usedEma ? emaDownTrendColor : color.white
 plot(shema ? usedEma : na, title="EMA", style=plot.style_line, linewidth=3, color=emaColor)
 
 
@@ -338,7 +340,7 @@ if markNoWickCandles and bullishNoBottomWick
 else if markNoWickCandles and bearishNoTopWick
     finalBarColor := noWickBearishColor
 else if showEmaBarColor
-    finalBarColor := emaUpColor ? color.lime : emaDownColor ? color.red : na
+    finalBarColor := emaUpColor ? emaUpTrendColor : emaDownColor ? emaDownTrendColor : na
 
 barcolor(finalBarColor)
 
