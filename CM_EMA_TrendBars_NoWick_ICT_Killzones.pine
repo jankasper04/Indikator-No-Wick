@@ -1,9 +1,9 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// Combined Indicator: CM_EMA Trend Bars + No Wick Identifier + ICT Killzones & Pivots
-// Based on: CM_EMA Trend Bars by ChrisMoody (11/1/2014) & ICT Killzones & Pivots by TFO
+// Combined Indicator: CM_EMA Trend Bars + No Wick Identifier + ICT Killzones & Pivots + Sessions
+// Based on: CM_EMA Trend Bars by ChrisMoody, ICT Killzones & Pivots by TFO, Sessions by Aurocks_AIF
 
 //@version=5
-indicator(title="CM_EMA TrendBars + NoWick + ICT Killzones", shorttitle="EMA+NoWick+ICT KZ", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
+indicator(title="CM_EMA TrendBars + NoWick + ICT Killzones + Sessions", shorttitle="EMA+NoWick+ICT KZ+Sessions", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
 
 
 // ============================================================================
@@ -61,6 +61,31 @@ showCompensationLines = input.bool(true, title="Show Compensation Lines?", group
 showCompensationLabels = input.bool(true, title="Show Compensation Labels?", group=g_NOWICK)
 compensationColor = input.color(color.rgb(255, 174, 53, 5), title="Compensation Line/Label Color", group=g_NOWICK)
 barsToRightMultiplier = input.int(10, minval=1, maxval=100, title="Line Length (bars)", group=g_NOWICK)
+
+
+// ============================================================================
+// INPUTS - SESSIONS (Background Colors)
+// ============================================================================
+var g_SESSIONS = "═══ Sessions (Background) ═══"
+sessionsEnabled = input.bool(true, "Enable Sessions Background", group=g_SESSIONS)
+bgColorMode = input.bool(false, "Activate High/Low View", tooltip="When enabled, shows session range as fill between high/low. When disabled, shows as background color.", group=g_SESSIONS)
+sessionsRes = input.timeframe("D", "Resolution", options=["D","W","M"], group=g_SESSIONS)
+
+showLondonSession = input.bool(true, "London Session", inline="LON_S", group=g_SESSIONS)
+londonSessionTime = input.session("0300-1200:1234567", "", inline="LON_S", group=g_SESSIONS)
+londonSessionColor = input.color(color.new(color.green, 90), "", inline="LON_S", group=g_SESSIONS)
+
+showNYSession = input.bool(true, "New York Session", inline="NY_S", group=g_SESSIONS)
+nySessionTime = input.session("0800-1700:1234567", "", inline="NY_S", group=g_SESSIONS)
+nySessionColor = input.color(color.new(color.red, 90), "", inline="NY_S", group=g_SESSIONS)
+
+showTokyoSession = input.bool(true, "Tokyo Session", inline="TK_S", group=g_SESSIONS)
+tokyoSessionTime = input.session("2000-0400:1234567", "", inline="TK_S", group=g_SESSIONS)
+tokyoSessionColor = input.color(color.new(color.yellow, 90), "", inline="TK_S", group=g_SESSIONS)
+
+showSydneySession = input.bool(false, "Sydney Session", inline="SY_S", group=g_SESSIONS)
+sydneySessionTime = input.session("1700-0200:1234567", "", inline="SY_S", group=g_SESSIONS)
+sydneySessionColor = input.color(color.new(color.blue, 90), "", inline="SY_S", group=g_SESSIONS)
 
 
 // ============================================================================
@@ -298,6 +323,126 @@ if showCompensationLines and (bullishNoBottomWick or bearishNoTopWick)
 
 if showCompensationLabels and (bullishNoBottomWick or bearishNoTopWick)
     label.new(x=bar_index + barsToRight + 1, y=open, text="Compensation", style=label.style_label_left, color=compensationColor, textcolor=color.white, size=size.small)
+
+
+// ============================================================================
+// SESSIONS (Background Colors) LOGIC
+// ============================================================================
+// Session helper functions
+is_newbar(sess) =>
+    t = time(sessionsRes, sess, "America/New_York")
+    na(t[1]) and not na(t) or t[1] < t
+
+is_session(sess) =>
+    not na(time(timeframe.period, sess, "America/New_York"))
+
+// London Session
+londonNewbar = is_newbar(londonSessionTime)
+londonSession = is_session(londonSessionTime)
+
+float londonLow = na
+londonLow := if londonSession
+    if londonNewbar
+        low
+    else
+        math.min(nz(londonLow[1], low), low)
+else
+    londonLow[1]
+
+float londonHigh = na
+londonHigh := if londonSession
+    if londonNewbar
+        high
+    else
+        math.max(nz(londonHigh[1], high), high)
+else
+    londonHigh[1]
+
+plotLL = plot(sessionsEnabled and showLondonSession ? londonLow : na, color=color.new(#000000, 100), title="London Low")
+plotLH = plot(sessionsEnabled and showLondonSession ? londonHigh : na, color=color.new(#000000, 100), title="London High")
+fill(plotLL, plotLH, color=sessionsEnabled and londonSession and showLondonSession and bgColorMode ? londonSessionColor : na, title="London Fill")
+bgcolor(sessionsEnabled and londonSession and showLondonSession and not bgColorMode ? londonSessionColor : na, title="London BG")
+
+// New York Session
+nyNewbar = is_newbar(nySessionTime)
+nySession = is_session(nySessionTime)
+
+float nyLow = na
+nyLow := if nySession
+    if nyNewbar
+        low
+    else
+        math.min(nz(nyLow[1], low), low)
+else
+    nyLow[1]
+
+float nyHigh = na
+nyHigh := if nySession
+    if nyNewbar
+        high
+    else
+        math.max(nz(nyHigh[1], high), high)
+else
+    nyHigh[1]
+
+plotNYL = plot(sessionsEnabled and showNYSession ? nyLow : na, color=color.new(#000000, 100), title="NY Low")
+plotNYH = plot(sessionsEnabled and showNYSession ? nyHigh : na, color=color.new(#000000, 100), title="NY High")
+fill(plotNYL, plotNYH, color=sessionsEnabled and nySession and showNYSession and bgColorMode ? nySessionColor : na, title="NY Fill")
+bgcolor(sessionsEnabled and nySession and showNYSession and not bgColorMode ? nySessionColor : na, title="NY BG")
+
+// Tokyo Session
+tokyoNewbar = is_newbar(tokyoSessionTime)
+tokyoSession = is_session(tokyoSessionTime)
+
+float tokyoLow = na
+tokyoLow := if tokyoSession
+    if tokyoNewbar
+        low
+    else
+        math.min(nz(tokyoLow[1], low), low)
+else
+    tokyoLow[1]
+
+float tokyoHigh = na
+tokyoHigh := if tokyoSession
+    if tokyoNewbar
+        high
+    else
+        math.max(nz(tokyoHigh[1], high), high)
+else
+    tokyoHigh[1]
+
+plotTL = plot(sessionsEnabled and showTokyoSession ? tokyoLow : na, color=color.new(#000000, 100), title="Tokyo Low")
+plotTH = plot(sessionsEnabled and showTokyoSession ? tokyoHigh : na, color=color.new(#000000, 100), title="Tokyo High")
+fill(plotTL, plotTH, color=sessionsEnabled and tokyoSession and showTokyoSession and bgColorMode ? tokyoSessionColor : na, title="Tokyo Fill")
+bgcolor(sessionsEnabled and tokyoSession and showTokyoSession and not bgColorMode ? tokyoSessionColor : na, title="Tokyo BG")
+
+// Sydney Session
+sydneyNewbar = is_newbar(sydneySessionTime)
+sydneySession = is_session(sydneySessionTime)
+
+float sydneyLow = na
+sydneyLow := if sydneySession
+    if sydneyNewbar
+        low
+    else
+        math.min(nz(sydneyLow[1], low), low)
+else
+    sydneyLow[1]
+
+float sydneyHigh = na
+sydneyHigh := if sydneySession
+    if sydneyNewbar
+        high
+    else
+        math.max(nz(sydneyHigh[1], high), high)
+else
+    sydneyHigh[1]
+
+plotSL = plot(sessionsEnabled and showSydneySession ? sydneyLow : na, color=color.new(#000000, 100), title="Sydney Low")
+plotSH = plot(sessionsEnabled and showSydneySession ? sydneyHigh : na, color=color.new(#000000, 100), title="Sydney High")
+fill(plotSL, plotSH, color=sessionsEnabled and sydneySession and showSydneySession and bgColorMode ? sydneySessionColor : na, title="Sydney Fill")
+bgcolor(sessionsEnabled and sydneySession and showSydneySession and not bgColorMode ? sydneySessionColor : na, title="Sydney BG")
 
 
 // ============================================================================
