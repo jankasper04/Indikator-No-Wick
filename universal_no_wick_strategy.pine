@@ -2,78 +2,56 @@
 strategy("Universal No Wick Pullback Strategy", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
 
 // ==================== INPUTS ====================
-// Trend Settings
 emaLength = input.int(50, "EMA Length for Trend", minval=5)
 useEmaFilter = input.bool(true, "Use EMA Trend Filter")
 
-// No Wick Candle Settings
 wickThreshold = input.float(10, "Max Wick Size (% of candle)", minval=0, maxval=50, step=1) / 100
 minBodyAtr = input.float(0.3, "Min Body Size (x ATR)", minval=0.1, step=0.1)
 maxBodyAtr = input.float(3.0, "Max Body Size (x ATR)", minval=0.5, step=0.1)
 
-// Entry Settings
 contracts = input.int(1, "Number of Contracts", minval=1)
 cancelAfter = input.int(10, "Cancel Order After X Candles", minval=1)
 
-// Exit Settings
 atrMultiplier = input.float(1.5, "ATR Multiplier for SL", minval=0.1, step=0.1)
 tpMultiplier = input.float(2.0, "TP (x SL)", minval=0.1, step=0.1)
 
-// Session Filter
 useSession = input.bool(false, "Use Session Filter")
 tradingSession = input.session("0200-1600", "Trading Session (NY Time)")
 
-// Visual Settings
 showZones = input.bool(true, "Show Entry/SL Zones")
 zoneTransparency = input.int(80, "Zone Transparency", minval=0, maxval=100)
 
 // ==================== CALCULATIONS ====================
-// ATR for dynamic sizing
 atr = ta.atr(14)
-
-// EMA for trend
 ema = ta.ema(close, emaLength)
 
-// Trend direction
 isUptrend = close > ema
 isDowntrend = close < ema
 
-// Calculate candle properties
 bodySize = math.abs(close - open)
 totalSize = high - low
-
-// Avoid division by zero
 safeTotal = totalSize > 0 ? totalSize : 1
 
-// Calculate wick sizes
 upperWick = high - math.max(open, close)
 lowerWick = math.min(open, close) - low
 
-// Calculate wick percentages relative to total candle size
 upperWickPercent = upperWick / safeTotal
 lowerWickPercent = lowerWick / safeTotal
-
-// Body size relative to ATR
 bodyAtrRatio = bodySize / atr
 
-// ==================== NO WICK CANDLE DETECTION ====================
-// Bullish No Wick: Green candle with small/no lower wick (in uptrend)
+// ==================== NO WICK DETECTION ====================
 isBullishCandle = close > open
 hasSmallLowerWick = lowerWickPercent <= wickThreshold
 validBullishBody = bodyAtrRatio >= minBodyAtr and bodyAtrRatio <= maxBodyAtr
 trendOkBullish = useEmaFilter ? isUptrend : true
-
 isBullishNoWick = isBullishCandle and hasSmallLowerWick and validBullishBody and trendOkBullish
 
-// Bearish No Wick: Red candle with small/no upper wick (in downtrend)
 isBearishCandle = close < open
 hasSmallUpperWick = upperWickPercent <= wickThreshold
 validBearishBody = bodyAtrRatio >= minBodyAtr and bodyAtrRatio <= maxBodyAtr
 trendOkBearish = useEmaFilter ? isDowntrend : true
-
 isBearishNoWick = isBearishCandle and hasSmallUpperWick and validBearishBody and trendOkBearish
 
-// Session filter
 isInSession = useSession ? not na(time(timeframe.period, tradingSession)) : true
 
 // ==================== STRATEGY VARIABLES ====================
@@ -90,14 +68,11 @@ var int shortOrderBars = 0
 var bool shortPending = false
 
 var float signalAtr = na
-
-// Box variables
 var box entryBox = na
 var box slBox = na
 
 // ==================== LONG SETUP ====================
 if isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending
-    // Delete old boxes
     if not na(entryBox)
         box.delete(entryBox)
     if not na(slBox)
@@ -110,22 +85,15 @@ if isBullishNoWick and isInSession and strategy.position_size == 0 and not longP
     longOrderBars := 0
     longPending := true
     
-    // Create Entry Zone Box (green)
     if showZones
-        entryBox := box.new(bar_index, close, bar_index + cancelAfter, longEntryPrice, 
-                           border_color=color.green, bgcolor=color.new(color.green, zoneTransparency),
-                           border_width=1)
-        // Create SL Zone Box (red) - below entry
-        slBox := box.new(bar_index, longEntryPrice, bar_index + cancelAfter, longStopLoss,
-                        border_color=color.red, bgcolor=color.new(color.red, zoneTransparency),
-                        border_width=1)
+        entryBox := box.new(bar_index, close, bar_index + cancelAfter, longEntryPrice, border_color=color.green, bgcolor=color.new(color.green, zoneTransparency), border_width=1)
+        slBox := box.new(bar_index, longEntryPrice, bar_index + cancelAfter, longStopLoss, border_color=color.red, bgcolor=color.new(color.red, zoneTransparency), border_width=1)
     
     strategy.entry("Long", strategy.long, limit=longEntryPrice, qty=contracts)
     strategy.exit("Long Exit", "Long", stop=longStopLoss, limit=longTakeProfit)
 
 // ==================== SHORT SETUP ====================
 if isBearishNoWick and isInSession and strategy.position_size == 0 and not shortPending and not longPending
-    // Delete old boxes
     if not na(entryBox)
         box.delete(entryBox)
     if not na(slBox)
@@ -138,21 +106,14 @@ if isBearishNoWick and isInSession and strategy.position_size == 0 and not short
     shortOrderBars := 0
     shortPending := true
     
-    // Create Entry Zone Box (green) - from open to close
     if showZones
-        entryBox := box.new(bar_index, shortEntryPrice, bar_index + cancelAfter, close,
-                           border_color=color.green, bgcolor=color.new(color.green, zoneTransparency),
-                           border_width=1)
-        // Create SL Zone Box (red) - above entry
-        slBox := box.new(bar_index, shortStopLoss, bar_index + cancelAfter, shortEntryPrice,
-                        border_color=color.red, bgcolor=color.new(color.red, zoneTransparency),
-                        border_width=1)
+        entryBox := box.new(bar_index, shortEntryPrice, bar_index + cancelAfter, close, border_color=color.green, bgcolor=color.new(color.green, zoneTransparency), border_width=1)
+        slBox := box.new(bar_index, shortStopLoss, bar_index + cancelAfter, shortEntryPrice, border_color=color.red, bgcolor=color.new(color.red, zoneTransparency), border_width=1)
     
     strategy.entry("Short", strategy.short, limit=shortEntryPrice, qty=contracts)
     strategy.exit("Short Exit", "Short", stop=shortStopLoss, limit=shortTakeProfit)
 
 // ==================== ORDER MANAGEMENT ====================
-// Cancel long orders after X candles if not filled
 if longPending
     longOrderBars := longOrderBars + 1
     if longOrderBars >= cancelAfter
@@ -169,7 +130,6 @@ if longPending
             box.delete(slBox)
             slBox := na
 
-// Cancel short orders after X candles if not filled
 if shortPending
     shortOrderBars := shortOrderBars + 1
     if shortOrderBars >= cancelAfter
@@ -186,14 +146,12 @@ if shortPending
             box.delete(slBox)
             slBox := na
 
-// Reset when position is opened
 if strategy.position_size > 0 and longPending
     longPending := false
     
 if strategy.position_size < 0 and shortPending
     shortPending := false
 
-// Reset when position is closed
 if strategy.position_size == 0 and strategy.position_size[1] != 0
     longEntryPrice := na
     longStopLoss := na
@@ -209,9 +167,7 @@ if strategy.position_size == 0 and strategy.position_size[1] != 0
         slBox := na
 
 // ==================== VISUALIZATION ====================
-// Plot EMA
 plot(ema, "EMA", color=color.orange, linewidth=2)
 
-// Plot signals for no-wick candles
 plotshape(isBullishNoWick and isInSession and strategy.position_size == 0, "Bullish No Wick", shape.triangleup, location.belowbar, color.lime, size=size.small)
 plotshape(isBearishNoWick and isInSession and strategy.position_size == 0, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
