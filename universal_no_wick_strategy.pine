@@ -71,6 +71,12 @@ var float signalAtr = na
 var box entryBox = na
 var box slBox = na
 
+// Track actual position SL/TP
+var float activeSL = na
+var float activeTP = na
+var bool inLong = false
+var bool inShort = false
+
 // ==================== LONG SETUP ====================
 if isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending
     if not na(entryBox)
@@ -90,7 +96,6 @@ if isBullishNoWick and isInSession and strategy.position_size == 0 and not longP
         slBox := box.new(bar_index, longEntryPrice, bar_index + cancelAfter, longStopLoss, border_color=color.red, bgcolor=color.new(color.red, zoneTransparency), border_width=1)
     
     strategy.entry("Long", strategy.long, limit=longEntryPrice, qty=contracts)
-    strategy.exit("Long Exit", "Long", stop=longStopLoss, limit=longTakeProfit)
 
 // ==================== SHORT SETUP ====================
 if isBearishNoWick and isInSession and strategy.position_size == 0 and not shortPending and not longPending
@@ -111,10 +116,54 @@ if isBearishNoWick and isInSession and strategy.position_size == 0 and not short
         slBox := box.new(bar_index, shortStopLoss, bar_index + cancelAfter, shortEntryPrice, border_color=color.red, bgcolor=color.new(color.red, zoneTransparency), border_width=1)
     
     strategy.entry("Short", strategy.short, limit=shortEntryPrice, qty=contracts)
-    strategy.exit("Short Exit", "Short", stop=shortStopLoss, limit=shortTakeProfit)
+
+// ==================== POSITION MANAGEMENT ====================
+// Detect when long position is opened
+if strategy.position_size > 0 and not inLong
+    inLong := true
+    inShort := false
+    longPending := false
+    // Set SL/TP based on actual entry price
+    activeSL := strategy.position_avg_price - (signalAtr * atrMultiplier)
+    activeTP := strategy.position_avg_price + (signalAtr * atrMultiplier * tpMultiplier)
+    strategy.exit("Long Exit", "Long", stop=activeSL, limit=activeTP)
+    // Clean up boxes
+    if not na(entryBox)
+        box.delete(entryBox)
+        entryBox := na
+    if not na(slBox)
+        box.delete(slBox)
+        slBox := na
+
+// Detect when short position is opened
+if strategy.position_size < 0 and not inShort
+    inShort := true
+    inLong := false
+    shortPending := false
+    // Set SL/TP based on actual entry price
+    activeSL := strategy.position_avg_price + (signalAtr * atrMultiplier)
+    activeTP := strategy.position_avg_price - (signalAtr * atrMultiplier * tpMultiplier)
+    strategy.exit("Short Exit", "Short", stop=activeSL, limit=activeTP)
+    // Clean up boxes
+    if not na(entryBox)
+        box.delete(entryBox)
+        entryBox := na
+    if not na(slBox)
+        box.delete(slBox)
+        slBox := na
+
+// Reset when position is closed
+if strategy.position_size == 0
+    if inLong or inShort
+        activeSL := na
+        activeTP := na
+        inLong := false
+        inShort := false
+        longEntryPrice := na
+        shortEntryPrice := na
 
 // ==================== ORDER MANAGEMENT ====================
-if longPending
+if longPending and strategy.position_size == 0
     longOrderBars := longOrderBars + 1
     if longOrderBars >= cancelAfter
         strategy.cancel("Long")
@@ -130,7 +179,7 @@ if longPending
             box.delete(slBox)
             slBox := na
 
-if shortPending
+if shortPending and strategy.position_size == 0
     shortOrderBars := shortOrderBars + 1
     if shortOrderBars >= cancelAfter
         strategy.cancel("Short")
@@ -146,28 +195,26 @@ if shortPending
             box.delete(slBox)
             slBox := na
 
-if strategy.position_size > 0 and longPending
-    longPending := false
-    
-if strategy.position_size < 0 and shortPending
-    shortPending := false
-
-if strategy.position_size == 0 and strategy.position_size[1] != 0
-    longEntryPrice := na
-    longStopLoss := na
-    longTakeProfit := na
-    shortEntryPrice := na
-    shortStopLoss := na
-    shortTakeProfit := na
-    if not na(entryBox)
-        box.delete(entryBox)
-        entryBox := na
-    if not na(slBox)
-        box.delete(slBox)
-        slBox := na
-
 // ==================== VISUALIZATION ====================
 plot(ema, "EMA", color=color.orange, linewidth=2)
 
-plotshape(isBullishNoWick and isInSession and strategy.position_size == 0, "Bullish No Wick", shape.triangleup, location.belowbar, color.lime, size=size.small)
-plotshape(isBearishNoWick and isInSession and strategy.position_size == 0, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
+// Plot active SL/TP lines when in position
+plot(inLong or inShort ? activeSL : na, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2)
+plot(inLong or inShort ? activeTP : na, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
+plot(inLong or inShort ? strategy.position_avg_price : na, "Entry", color=color.blue, style=plot.style_linebr, linewidth=1)
+
+// Plot signals
+plotshape(isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending, "Bullish No Wick", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(isBearishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// ==================== INFO TABLE ====================
+var table infoTable = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 80))
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Position", text_color=color.white)
+    table.cell(infoTable, 1, 0, inLong ? "LONG" : inShort ? "SHORT" : "FLAT", text_color=inLong ? color.green : inShort ? color.red : color.gray)
+    table.cell(infoTable, 0, 1, "Entry", text_color=color.white)
+    table.cell(infoTable, 1, 1, strategy.position_size != 0 ? str.tostring(strategy.position_avg_price, "#.##") : "-", text_color=color.blue)
+    table.cell(infoTable, 0, 2, "Stop Loss", text_color=color.white)
+    table.cell(infoTable, 1, 2, not na(activeSL) ? str.tostring(activeSL, "#.##") : "-", text_color=color.red)
+    table.cell(infoTable, 0, 3, "Take Profit", text_color=color.white)
+    table.cell(infoTable, 1, 3, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
