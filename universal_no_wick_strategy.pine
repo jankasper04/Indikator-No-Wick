@@ -541,9 +541,9 @@ plot(inLong or inShort ? activeSL : na, "Current SL", color=color.red, style=plo
 plot(inLong or inShort ? activeTP : na, "Current TP", color=color.green, style=plot.style_linebr, linewidth=2)
 plot(inLong or inShort ? activeEntry : na, "Current Entry", color=color.blue, style=plot.style_linebr, linewidth=1)
 
-// No-Wick Signals
-plotshape(bullishNoBottomWick, "Bullish No Wick", shape.triangleup, location.belowbar, color.green, size=size.small)
-plotshape(bearishNoTopWick, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
+// No-Wick Signals (disabled by default in style settings)
+plotshape(bullishNoBottomWick, "Bullish No Wick", shape.triangleup, location.belowbar, color.green, size=size.small, display=display.none)
+plotshape(bearishNoTopWick, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small, display=display.none)
 
 // HTF Start Markers
 plotshape(bullishNoWick30m and show_htf_marker, "Bullish 30m", shape.diamond, location.belowbar, color_30m, size=size.tiny)
