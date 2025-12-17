@@ -1,46 +1,38 @@
-// VWAP Combined Strategy - Mean Reversion with POC Confirmation
-// Entry: Candle closes outside VWAP band + POC inside band
-// SL: 1x ATR | TP: 1.5 RR
 //@version=6
-
-strategy(title="VWAP Combined Strategy", shorttitle="VWAP Strategy", overlay=true, 
-  max_bars_back=1000,
-  initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100,
-  commission_type=strategy.commission.percent, commission_value=0.04,
-  pyramiding=0)
+strategy("VWAP POC Mean Reversion Strategy", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, max_bars_back=1000)
 
 // ============================================
 // STRATEGY SETTINGS
 // ============================================
-STRATEGY_GROUP = "Strategy Settings"
-atrLength = input.int(14, "ATR Period", minval=1, group=STRATEGY_GROUP)
-atrMultSL = input.float(1.0, "ATR Multiplier for SL", minval=0.1, step=0.1, group=STRATEGY_GROUP)
-riskReward = input.float(1.5, "Risk-Reward Ratio", minval=0.5, step=0.1, group=STRATEGY_GROUP)
+tradingSession = input.session("0200-1600", "Trading Session (NY Time)")
+contracts = input.int(1, "Number of Contracts", minval=1)
+limitDistance = input.float(2, "Limit Order Distance (points)", minval=0, step=0.5)
+atrLength = input.int(14, "ATR Period", minval=1)
+atrMultiplier = input.float(1.0, "ATR Multiplier for SL", minval=0.1, step=0.1)
+tpMultiplier = input.float(1.5, "TP (RR Multiplier)", minval=0.1, step=0.1)
+cancelAfter = input.int(5, "Cancel Order After X Candles", minval=1)
 
 // ============================================
 // VWAP SETTINGS
 // ============================================
-VWAP_GROUP = "VWAP Settings"
-var anchor = input.string(defval="Session", title="Anchor Period",
-     options=["Session", "Week", "Month", "Quarter", "Year"], group=VWAP_GROUP)
-bandMult = input.float(1.0, title="Band Multiplier", group=VWAP_GROUP, step=0.5, minval=0.1)
+anchor = input.string("Session", "VWAP Anchor", options=["Session", "Week", "Month", "Quarter", "Year"])
+bandMult = input.float(1.0, "VWAP Band Multiplier", step=0.5, minval=0.1)
 
 // ============================================
 // VOLUME PROFILE SETTINGS
 // ============================================
-VP_GROUP = "Volume Profile"
-vpLength = input.int(300, 'Lookback', minval=1, maxval=1000, group=VP_GROUP)
-vpRow = input.int(26, 'Row Size', minval=1, maxval=500, group=VP_GROUP)
+vpLength = input.int(300, "VP Lookback", minval=1, maxval=1000)
+vpRow = input.int(26, "VP Row Size", minval=1, maxval=500)
 
 // ============================================
 // VWAP CALCULATIONS
 // ============================================
 isNewPeriod = switch anchor
-    "Session"   => timeframe.change("D")
-    "Week"      => timeframe.change("W")
-    "Month"     => timeframe.change("M")
-    "Quarter"   => timeframe.change("3M")
-    "Year"      => timeframe.change("12M")
+    "Session" => timeframe.change("D")
+    "Week"    => timeframe.change("W")
+    "Month"   => timeframe.change("M")
+    "Quarter" => timeframe.change("3M")
+    "Year"    => timeframe.change("12M")
     => false
 
 if na(hlc3[1])
@@ -54,7 +46,7 @@ lowerBand = vwapValue - stdevAbs * bandMult
 // ============================================
 // ATR CALCULATION
 // ============================================
-atrValue = ta.atr(atrLength)
+atr = ta.atr(atrLength)
 
 // ============================================
 // VOLUME PROFILE - POC CALCULATION
@@ -88,7 +80,7 @@ if barstate.isconfirmed
         pocValue := math.avg(array.get(levels, maxVolIdx), array.get(levels, maxVolIdx + 1))
 
 // ============================================
-// STRATEGY LOGIC
+// ENTRY CONDITIONS
 // ============================================
 // Check if POC is inside VWAP bands
 pocInsideBands = pocValue <= upperBand and pocValue >= lowerBand
@@ -97,37 +89,78 @@ pocInsideBands = pocValue <= upperBand and pocValue >= lowerBand
 closeAboveUpperBand = close > upperBand
 closeBelowLowerBand = close < lowerBand
 
-// Entry conditions
-longCondition = closeBelowLowerBand and pocInsideBands and strategy.position_size == 0
-shortCondition = closeAboveUpperBand and pocInsideBands and strategy.position_size == 0
+// Detect entry conditions
+isLongSetup = closeBelowLowerBand and pocInsideBands
+isShortSetup = closeAboveUpperBand and pocInsideBands
 
-// Calculate SL and TP levels
-slDistance = atrValue * atrMultSL
-tpDistance = slDistance * riskReward
-
-// Execute trades
-if longCondition
-    strategy.entry("Long", strategy.long)
-    strategy.exit("Long Exit", "Long", stop=close - slDistance, limit=close + tpDistance)
-
-if shortCondition
-    strategy.entry("Short", strategy.short)
-    strategy.exit("Short Exit", "Short", stop=close + slDistance, limit=close - tpDistance)
+// Check if within trading session
+isInSession = not na(time(timeframe.period, tradingSession))
 
 // ============================================
-// PLOTS
+// STRATEGY LOGIC
 // ============================================
-plot(vwapValue, title="VWAP", color=#2962FF)
-plot(upperBand, title="Upper Band", color=color.green)
-plot(lowerBand, title="Lower Band", color=color.green)
-plot(pocValue, title="POC", color=#ff0000, linewidth=2)
+var float longEntryPrice = na
+var float shortEntryPrice = na
+var int longOrderBars = 0
+var int shortOrderBars = 0
 
-// Entry Signals
-plotshape(longCondition, title="Long", location=location.belowbar, color=color.lime, style=shape.triangleup, size=size.small)
-plotshape(shortCondition, title="Short", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small)
+// Long setup
+if isLongSetup and isInSession and strategy.position_size == 0
+    longEntryPrice := close - limitDistance
+    longOrderBars := 0
+    strategy.entry("Long", strategy.long, limit=longEntryPrice, qty=contracts)
+    strategy.exit("TP/SL", "Long", stop=longEntryPrice - atr * atrMultiplier, limit=longEntryPrice + (atr * atrMultiplier * tpMultiplier))
+
+// Short setup
+if isShortSetup and isInSession and strategy.position_size == 0
+    shortEntryPrice := close + limitDistance
+    shortOrderBars := 0
+    strategy.entry("Short", strategy.short, limit=shortEntryPrice, qty=contracts)
+    strategy.exit("TP/SL", "Short", stop=shortEntryPrice + atr * atrMultiplier, limit=shortEntryPrice - (atr * atrMultiplier * tpMultiplier))
+
+// Cancel orders if not executed
+if not na(longEntryPrice)
+    longOrderBars := longOrderBars + 1
+    if longOrderBars >= cancelAfter
+        strategy.cancel("Long")
+        longEntryPrice := na
+        longOrderBars := 0
+
+if not na(shortEntryPrice)
+    shortOrderBars := shortOrderBars + 1
+    if shortOrderBars >= cancelAfter
+        strategy.cancel("Short")
+        shortEntryPrice := na
+        shortOrderBars := 0
+
+// ============================================
+// PLOTS - VWAP & POC
+// ============================================
+plot(vwapValue, "VWAP", color=#2962FF)
+plot(upperBand, "Upper Band", color=color.green)
+plot(lowerBand, "Lower Band", color=color.green)
+plot(pocValue, "POC", color=#ff0000, linewidth=2)
+
+// ============================================
+// PLOTS - SIGNALS
+// ============================================
+plotshape(isLongSetup and isInSession, "Long Setup", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(isShortSetup and isInSession, "Short Setup", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// ============================================
+// PLOTS - SL & TP LINES
+// ============================================
+currentSL = not na(longEntryPrice) ? longEntryPrice - atr * atrMultiplier : 
+           not na(shortEntryPrice) ? shortEntryPrice + atr * atrMultiplier : na
+
+currentTP = not na(longEntryPrice) ? longEntryPrice + (atr * atrMultiplier * tpMultiplier) : 
+           not na(shortEntryPrice) ? shortEntryPrice - (atr * atrMultiplier * tpMultiplier) : na
+
+plot(currentSL, "Stop Loss", color=color.red, style=plot.style_linebr)
+plot(currentTP, "Take Profit", color=color.green, style=plot.style_linebr)
 
 // ============================================
 // ALERTS
 // ============================================
-alertcondition(longCondition, title="Long Entry", message="VWAP Strategy: Long Entry")
-alertcondition(shortCondition, title="Short Entry", message="VWAP Strategy: Short Entry")
+alertcondition(isLongSetup and isInSession, "Long Entry", "VWAP Strategy: Long Setup")
+alertcondition(isShortSetup and isInSession, "Short Entry", "VWAP Strategy: Short Setup")
