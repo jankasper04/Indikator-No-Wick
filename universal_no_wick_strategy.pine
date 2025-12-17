@@ -1,0 +1,86 @@
+//@version=5
+strategy("Universal 15min No Wick Strategy V1", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
+
+// Input settings
+wickThreshold = input.float(0.6, "Wick Size Threshold (%)", minval=0, maxval=100, step=0.1) / 100
+tradingSession = input.session("0200-1600", "Trading Session (NY Time)")
+contracts = input.int(1, "Number of Contracts", minval=1)
+limitDistance = input.float(2, "Limit Order Distance (points)", minval=1)
+atrMultiplier = input.float(2, "ATR Multiplier for SL", minval=0.1, step=0.1)
+tpMultiplier = input.float(0.8, "TP (SL multiplier)", minval=0.1, step=0.1)
+cancelAfter = input.int(5, "Cancel Order After X Candles", minval=1)
+minBodySize = input.float(10, "Minimum Body Size (points)", minval=0, step=1)
+maxBodySize = input.float(50, "Maximum Body Size (points)", minval=0, step=1)
+
+// Calculate ATR
+atr = ta.atr(14)
+
+// Calculate candle properties
+bodySize = math.abs(close - open)
+totalSize = high - low
+
+// Calculate wick sizes
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+
+// Calculate wick percentages
+upperWickPercent = upperWick / totalSize
+lowerWickPercent = lowerWick / totalSize
+
+// Detect no-wick conditions with body size filters
+isBullishNoWick = close > open and lowerWickPercent <= wickThreshold and bodySize >= minBodySize and bodySize <= maxBodySize
+isBearishNoWick = close < open and upperWickPercent <= wickThreshold and bodySize >= minBodySize and bodySize <= maxBodySize
+
+// Check if within trading session
+isInSession = not na(time(timeframe.period, tradingSession))
+
+// Strategy logic
+var float longEntryPrice = na
+var float shortEntryPrice = na
+var int longOrderBars = 0
+var int shortOrderBars = 0
+
+// Long setup
+if isBullishNoWick and isInSession and strategy.position_size == 0
+    longEntryPrice := open - limitDistance
+    longOrderBars := 0
+    strategy.entry("Long", strategy.long, limit=longEntryPrice, qty=contracts)
+    strategy.exit("TP/SL", "Long", stop=longEntryPrice - atr * atrMultiplier, limit=longEntryPrice + (atr * atrMultiplier * tpMultiplier))
+
+// Short setup
+if isBearishNoWick and isInSession and strategy.position_size == 0
+    shortEntryPrice := close + limitDistance
+    shortOrderBars := 0
+    strategy.entry("Short", strategy.short, limit=shortEntryPrice, qty=contracts)
+    strategy.exit("TP/SL", "Short", stop=shortEntryPrice + atr * atrMultiplier, limit=shortEntryPrice - (atr * atrMultiplier * tpMultiplier))
+
+// Cancel orders if not executed
+if not na(longEntryPrice)
+    longOrderBars := longOrderBars + 1
+    if longOrderBars >= cancelAfter
+        strategy.cancel("Long")
+        longEntryPrice := na
+        longOrderBars := 0
+
+if not na(shortEntryPrice)
+    shortOrderBars := shortOrderBars + 1
+    if shortOrderBars >= cancelAfter
+        strategy.cancel("Short")
+        shortEntryPrice := na
+        shortOrderBars := 0
+
+// Plot signals for visualization
+plotshape(isBullishNoWick and isInSession, "Bullish No Wick", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(isBearishNoWick and isInSession, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+
+// Calculate current SL and TP levels
+currentSL = not na(longEntryPrice) ? longEntryPrice - atr * atrMultiplier : 
+           not na(shortEntryPrice) ? shortEntryPrice + atr * atrMultiplier : na
+
+currentTP = not na(longEntryPrice) ? longEntryPrice + (atr * atrMultiplier * tpMultiplier) : 
+           not na(shortEntryPrice) ? shortEntryPrice - (atr * atrMultiplier * tpMultiplier) : na
+
+// Plot single SL and TP lines
+plot(currentSL, "Stop Loss", color=color.red, style=plot.style_line)
+plot(currentTP, "Take Profit", color=color.green, style=plot.style_line)
