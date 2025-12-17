@@ -546,12 +546,12 @@ plotshape(bullishNoBottomWick, "Bullish No Wick", shape.triangleup, location.bel
 plotshape(bearishNoTopWick, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small, display=display.none)
 
 // HTF Start Markers
-plotshape(bullishNoWick30m and show_htf_marker, "Bullish 30m", shape.diamond, location.belowbar, color_30m, size=size.tiny)
-plotshape(bearishNoWick30m and show_htf_marker, "Bearish 30m", shape.diamond, location.abovebar, color_30m, size=size.tiny)
+plotshape(bullishNoWick30m and show_htf_marker, "Bullish 30m", shape.arrowup, location.belowbar, color_30m, size=size.tiny)
+plotshape(bearishNoWick30m and show_htf_marker, "Bearish 30m", shape.arrowdown, location.abovebar, color_30m, size=size.tiny)
 plotshape(bullishNoWick1h and show_htf_marker, "Bullish 1h", shape.diamond, location.belowbar, color_1h, size=size.tiny)
 plotshape(bearishNoWick1h and show_htf_marker, "Bearish 1h", shape.diamond, location.abovebar, color_1h, size=size.tiny)
-plotshape(bullishNoWick4h and show_htf_marker, "Bullish 4h", shape.xcross, location.belowbar, color_4h, size=size.small)
-plotshape(bearishNoWick4h and show_htf_marker, "Bearish 4h", shape.xcross, location.abovebar, color_4h, size=size.small)
+plotshape(bullishNoWick4h and show_htf_marker, "Bullish 4h", shape.flag, location.belowbar, color_4h, size=size.small)
+plotshape(bearishNoWick4h and show_htf_marker, "Bearish 4h", shape.flag, location.abovebar, color_4h, size=size.small)
 
 // Valid signals
 plotshape(isBullishNoWick and canGoLong, "Valid Long", shape.circle, location.belowbar, color.lime, size=size.tiny)
