@@ -1,0 +1,166 @@
+//@version=6
+strategy("VWAP POC Mean Reversion Strategy", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, max_bars_back=1000)
+
+// ============================================
+// STRATEGY SETTINGS
+// ============================================
+tradingSession = input.session("0200-1600", "Trading Session (NY Time)")
+contracts = input.int(1, "Number of Contracts", minval=1)
+limitDistance = input.float(2, "Limit Order Distance (points)", minval=0, step=0.5)
+atrLength = input.int(14, "ATR Period", minval=1)
+atrMultiplier = input.float(1.0, "ATR Multiplier for SL", minval=0.1, step=0.1)
+tpMultiplier = input.float(1.5, "TP (RR Multiplier)", minval=0.1, step=0.1)
+cancelAfter = input.int(5, "Cancel Order After X Candles", minval=1)
+
+// ============================================
+// VWAP SETTINGS
+// ============================================
+anchor = input.string("Session", "VWAP Anchor", options=["Session", "Week", "Month", "Quarter", "Year"])
+bandMult = input.float(1.0, "VWAP Band Multiplier", step=0.5, minval=0.1)
+
+// ============================================
+// VOLUME PROFILE SETTINGS
+// ============================================
+vpLength = input.int(300, "VP Lookback", minval=1, maxval=1000)
+vpRow = input.int(26, "VP Row Size", minval=1, maxval=500)
+
+// ============================================
+// VWAP CALCULATIONS
+// ============================================
+isNewPeriod = switch anchor
+    "Session" => timeframe.change("D")
+    "Week"    => timeframe.change("W")
+    "Month"   => timeframe.change("M")
+    "Quarter" => timeframe.change("3M")
+    "Year"    => timeframe.change("12M")
+    => false
+
+if na(hlc3[1])
+    isNewPeriod := true
+
+[vwapValue, stdevUpper, _] = ta.vwap(hlc3, isNewPeriod, 1)
+stdevAbs = stdevUpper - vwapValue
+upperBand = vwapValue + stdevAbs * bandMult
+lowerBand = vwapValue - stdevAbs * bandMult
+
+// ============================================
+// ATR CALCULATION
+// ============================================
+atr = ta.atr(atrLength)
+
+// ============================================
+// VOLUME PROFILE - POC CALCULATION
+// ============================================
+var float pocValue = 0.0
+
+vpHighest = ta.highest(high, vpLength)
+vpLowest = ta.lowest(low, vpLength)
+
+if barstate.isconfirmed
+    float[] levels = array.new_float(vpRow + 1)
+    float[] sumv = array.new_float(vpRow, 0.0)
+    
+    priceRange = vpHighest - vpLowest
+    for i = 0 to vpRow
+        array.set(levels, i, vpLowest + i / vpRow * priceRange)
+    
+    for j = 0 to vpRow - 1
+        lvlLow = array.get(levels, j)
+        lvlHigh = array.get(levels, j + 1)
+        sum = 0.0
+        for k = 0 to vpLength - 1
+            if high[k] > lvlLow and low[k] < lvlHigh
+                sum += volume[k]
+        array.set(sumv, j, sum)
+    
+    maxVol = array.max(sumv)
+    maxVolIdx = array.indexof(sumv, maxVol)
+    
+    if maxVolIdx >= 0
+        pocValue := math.avg(array.get(levels, maxVolIdx), array.get(levels, maxVolIdx + 1))
+
+// ============================================
+// ENTRY CONDITIONS
+// ============================================
+// Check if POC is inside VWAP bands
+pocInsideBands = pocValue <= upperBand and pocValue >= lowerBand
+
+// Check if close is outside VWAP bands
+closeAboveUpperBand = close > upperBand
+closeBelowLowerBand = close < lowerBand
+
+// Detect entry conditions
+isLongSetup = closeBelowLowerBand and pocInsideBands
+isShortSetup = closeAboveUpperBand and pocInsideBands
+
+// Check if within trading session
+isInSession = not na(time(timeframe.period, tradingSession))
+
+// ============================================
+// STRATEGY LOGIC
+// ============================================
+var float longEntryPrice = na
+var float shortEntryPrice = na
+var int longOrderBars = 0
+var int shortOrderBars = 0
+
+// Long setup
+if isLongSetup and isInSession and strategy.position_size == 0
+    longEntryPrice := close - limitDistance
+    longOrderBars := 0
+    strategy.entry("Long", strategy.long, limit=longEntryPrice, qty=contracts)
+    strategy.exit("TP/SL", "Long", stop=longEntryPrice - atr * atrMultiplier, limit=longEntryPrice + (atr * atrMultiplier * tpMultiplier))
+
+// Short setup
+if isShortSetup and isInSession and strategy.position_size == 0
+    shortEntryPrice := close + limitDistance
+    shortOrderBars := 0
+    strategy.entry("Short", strategy.short, limit=shortEntryPrice, qty=contracts)
+    strategy.exit("TP/SL", "Short", stop=shortEntryPrice + atr * atrMultiplier, limit=shortEntryPrice - (atr * atrMultiplier * tpMultiplier))
+
+// Cancel orders if not executed
+if not na(longEntryPrice)
+    longOrderBars := longOrderBars + 1
+    if longOrderBars >= cancelAfter
+        strategy.cancel("Long")
+        longEntryPrice := na
+        longOrderBars := 0
+
+if not na(shortEntryPrice)
+    shortOrderBars := shortOrderBars + 1
+    if shortOrderBars >= cancelAfter
+        strategy.cancel("Short")
+        shortEntryPrice := na
+        shortOrderBars := 0
+
+// ============================================
+// PLOTS - VWAP & POC
+// ============================================
+plot(vwapValue, "VWAP", color=#2962FF)
+plot(upperBand, "Upper Band", color=color.green)
+plot(lowerBand, "Lower Band", color=color.green)
+plot(pocValue, "POC", color=#ff0000, linewidth=2)
+
+// ============================================
+// PLOTS - SIGNALS
+// ============================================
+plotshape(isLongSetup and isInSession, "Long Setup", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(isShortSetup and isInSession, "Short Setup", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// ============================================
+// PLOTS - SL & TP LINES
+// ============================================
+currentSL = not na(longEntryPrice) ? longEntryPrice - atr * atrMultiplier : 
+           not na(shortEntryPrice) ? shortEntryPrice + atr * atrMultiplier : na
+
+currentTP = not na(longEntryPrice) ? longEntryPrice + (atr * atrMultiplier * tpMultiplier) : 
+           not na(shortEntryPrice) ? shortEntryPrice - (atr * atrMultiplier * tpMultiplier) : na
+
+plot(currentSL, "Stop Loss", color=color.red, style=plot.style_linebr)
+plot(currentTP, "Take Profit", color=color.green, style=plot.style_linebr)
+
+// ============================================
+// ALERTS
+// ============================================
+alertcondition(isLongSetup and isInSession, "Long Entry", "VWAP Strategy: Long Setup")
+alertcondition(isShortSetup and isInSession, "Short Entry", "VWAP Strategy: Short Setup")
