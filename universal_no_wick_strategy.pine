@@ -4,7 +4,7 @@ strategy("Universal No Wick Market Structure Strategy", overlay=true, initial_ca
 // ==================== TREND FILTER METHOD ====================
 filterSettings = "Trend Filter Settings"
 trendMethod = input.string("Market Structure", "Trend Filter Method", options=["Market Structure", "EMA"], group=filterSettings)
-emaLength = input.int(50, "EMA Length", group=filterSettings, minval=5, tooltip="Only used when EMA method is selected")
+emaLength = input.int(50, "EMA Length", group=filterSettings, minval=5)
 
 // ==================== MARKET STRUCTURE INPUTS ====================
 msSettings = "Market Structure Settings"
@@ -95,123 +95,122 @@ isHigherLow = l0 > l1
 isLowerHigh = h0 < h1
 isLowerLow = l0 < l1
 
-// ==================== MARKET STRUCTURE STATE (PERSISTENT) ====================
+// ==================== MARKET STRUCTURE STATE ====================
 var int marketStructure = 0  // -1 = Bearish, 0 = Neutral, 1 = Bullish
 
-// ==================== ChoCH & BOS DETECTION ====================
-var bool chochBullishTriggered = false
-var bool chochBearishTriggered = false
-var bool bosBullishTriggered = false
-var bool bosBearishTriggered = false
+// Initialize structure based on swing points
+if marketStructure == 0
+    if isHigherHigh and isHigherLow
+        marketStructure := 1
+    else if isLowerHigh and isLowerLow
+        marketStructure := -1
 
+// ==================== ChoCH & BOS TRACKING ====================
+var float lastChochLevel = na
+var int lastChochBar = na
+var float lastBosLevel = na
+var int lastBosBar = na
+
+// Track if we already triggered ChoCH/BOS for current swing
+var bool chochBullishDone = false
+var bool chochBearishDone = false
+var bool bosBullishDone = false
+var bool bosBearishDone = false
+
+// Current bar events
 chochBullish = false
 chochBearish = false
 bosBullish = false
 bosBearish = false
 
-var float eventLevel = na
-var int eventBar = na
-
-// STEP 1: Check for ChoCH (Structure Change)
-// Bullish ChoCH: Close above LH when structure is NOT bullish
-if close > h0 and isLowerHigh and marketStructure != 1 and not chochBullishTriggered
+// ==================== ChoCH DETECTION ====================
+// Bullish ChoCH: Close above LH (Lower High) → Shift to Bullish
+if close > h0 and isLowerHigh and not chochBullishDone
     chochBullish := true
-    chochBullishTriggered := true
-    chochBearishTriggered := false
-    bosBullishTriggered := false
-    bosBearishTriggered := false
-    eventLevel := h0
-    eventBar := h0i
-    marketStructure := 1  // IMMEDIATELY set to Bullish
+    chochBullishDone := true
+    chochBearishDone := false
+    bosBullishDone := false
+    bosBearishDone := false
+    lastChochLevel := h0
+    lastChochBar := h0i
+    marketStructure := 1
 
-// Bearish ChoCH: Close below HL when structure is NOT bearish
-if close < l0 and isHigherLow and marketStructure != -1 and not chochBearishTriggered
+// Bearish ChoCH: Close below HL (Higher Low) → Shift to Bearish
+if close < l0 and isHigherLow and not chochBearishDone
     chochBearish := true
-    chochBearishTriggered := true
-    chochBullishTriggered := false
-    bosBullishTriggered := false
-    bosBearishTriggered := false
-    eventLevel := l0
-    eventBar := l0i
-    marketStructure := -1  // IMMEDIATELY set to Bearish
+    chochBearishDone := true
+    chochBullishDone := false
+    bosBullishDone := false
+    bosBearishDone := false
+    lastChochLevel := l0
+    lastChochBar := l0i
+    marketStructure := -1
 
-// STEP 2: Check for BOS (Structure Continuation) - only if no ChoCH on this bar
-if not chochBullish and not chochBearish
-    // BOS Bullish: Already bullish, close above HH
-    if close > h0 and isHigherHigh and marketStructure == 1 and not bosBullishTriggered
-        bosBullish := true
-        bosBullishTriggered := true
-        eventLevel := h0
-        eventBar := h0i
-    
-    // BOS Bearish: Already bearish, close below LL
-    if close < l0 and isLowerLow and marketStructure == -1 and not bosBearishTriggered
-        bosBearish := true
-        bosBearishTriggered := true
-        eventLevel := l0
-        eventBar := l0i
+// ==================== BOS DETECTION ====================
+// BOS Bullish: Close above HH (Higher High) in Bullish structure → Continuation
+if close > h0 and isHigherHigh and marketStructure == 1 and not bosBullishDone and not chochBullish
+    bosBullish := true
+    bosBullishDone := true
+    lastBosLevel := h0
+    lastBosBar := h0i
+
+// BOS Bearish: Close below LL (Lower Low) in Bearish structure → Continuation
+if close < l0 and isLowerLow and marketStructure == -1 and not bosBearishDone and not chochBearish
+    bosBearish := true
+    bosBearishDone := true
+    lastBosLevel := l0
+    lastBosBar := l0i
 
 // Reset triggers when new swing points form
 if ta.change(zigzagTrend) != 0
-    chochBullishTriggered := false
-    chochBearishTriggered := false
-    bosBullishTriggered := false
-    bosBearishTriggered := false
+    chochBullishDone := false
+    chochBearishDone := false
+    bosBullishDone := false
+    bosBearishDone := false
 
 // ==================== FINAL STRUCTURE STATUS ====================
 isMSBullishStructure = marketStructure == 1
 isMSBearishStructure = marketStructure == -1
 
-// ==================== COMBINED TREND FILTER ====================
 isBullishStructure = trendMethod == "Market Structure" ? isMSBullishStructure : isEmaUptrend
 isBearishStructure = trendMethod == "Market Structure" ? isMSBearishStructure : isEmaDowntrend
 
 // ==================== HH/HL/LH/LL LABELS ====================
-var label lastHighLabel = na
-var label lastLowLabel = na
-
 if ta.change(zigzagTrend) != 0 and show_hh_ll and trendMethod == "Market Structure"
     if zigzagTrend == -1
-        if not na(lastHighLabel)
-            label.delete(lastHighLabel)
         labelText = isHigherHigh ? "HH" : "LH"
         labelColor = isHigherHigh ? color.green : color.red
-        lastHighLabel := label.new(h0i, h0, labelText, color=color.new(color.black, 100), style=label.style_label_down, textcolor=labelColor, size=size.small)
-    
+        label.new(h0i, h0, labelText, color=color.new(color.black, 100), style=label.style_label_down, textcolor=labelColor, size=size.small)
     if zigzagTrend == 1
-        if not na(lastLowLabel)
-            label.delete(lastLowLabel)
         labelText = isHigherLow ? "HL" : "LL"
         labelColor = isHigherLow ? color.green : color.red
-        lastLowLabel := label.new(l0i, l0, labelText, color=color.new(color.black, 100), style=label.style_label_up, textcolor=labelColor, size=size.small)
+        label.new(l0i, l0, labelText, color=color.new(color.black, 100), style=label.style_label_up, textcolor=labelColor, size=size.small)
 
 // ==================== ChoCH VISUALIZATION ====================
 if chochBullish and show_choch and trendMethod == "Market Structure"
-    line.new(eventBar, eventLevel, bar_index, eventLevel, color=color.green, width=2, style=line.style_solid)
-    label.new(bar_index, eventLevel, "ChoCH ↑", color=color.new(color.green, 70), style=label.style_label_up, textcolor=color.white, size=size.small)
+    line.new(lastChochBar, lastChochLevel, bar_index, lastChochLevel, color=color.green, width=2, style=line.style_solid)
+    label.new(bar_index, lastChochLevel, "ChoCH ↑", color=color.new(color.green, 70), style=label.style_label_up, textcolor=color.white, size=size.small)
 
 if chochBearish and show_choch and trendMethod == "Market Structure"
-    line.new(eventBar, eventLevel, bar_index, eventLevel, color=color.red, width=2, style=line.style_solid)
-    label.new(bar_index, eventLevel, "ChoCH ↓", color=color.new(color.red, 70), style=label.style_label_down, textcolor=color.white, size=size.small)
+    line.new(lastChochBar, lastChochLevel, bar_index, lastChochLevel, color=color.red, width=2, style=line.style_solid)
+    label.new(bar_index, lastChochLevel, "ChoCH ↓", color=color.new(color.red, 70), style=label.style_label_down, textcolor=color.white, size=size.small)
 
 // ==================== BOS VISUALIZATION ====================
 if bosBullish and show_bos and trendMethod == "Market Structure"
-    line.new(eventBar, eventLevel, bar_index, eventLevel, color=color.teal, width=1, style=line.style_dashed)
-    label.new(bar_index, eventLevel, "BOS ↑", color=color.new(color.teal, 70), style=label.style_label_down, textcolor=color.white, size=size.tiny)
+    line.new(lastBosBar, lastBosLevel, bar_index, lastBosLevel, color=color.teal, width=1, style=line.style_dashed)
+    label.new(bar_index, lastBosLevel, "BOS ↑", color=color.new(color.teal, 70), style=label.style_label_down, textcolor=color.white, size=size.tiny)
 
 if bosBearish and show_bos and trendMethod == "Market Structure"
-    line.new(eventBar, eventLevel, bar_index, eventLevel, color=color.orange, width=1, style=line.style_dashed)
-    label.new(bar_index, eventLevel, "BOS ↓", color=color.new(color.orange, 70), style=label.style_label_up, textcolor=color.white, size=size.tiny)
+    line.new(lastBosBar, lastBosLevel, bar_index, lastBosLevel, color=color.orange, width=1, style=line.style_dashed)
+    label.new(bar_index, lastBosLevel, "BOS ↓", color=color.new(color.orange, 70), style=label.style_label_up, textcolor=color.white, size=size.tiny)
 
 // ==================== NO WICK CANDLE DETECTION ====================
 bullishNoBottomWick = open == low and close > open
 bearishNoTopWick = open == high and close < open
 
-// CRITICAL: Only allow trades in the correct direction based on CURRENT structure
-// After ChoCH Bullish → ONLY LONG
-// After ChoCH Bearish → ONLY SHORT
-isBullishNoWick = bullishNoBottomWick and isBullishStructure
-isBearishNoWick = bearishNoTopWick and isBearishStructure
+// STRICT: Only valid signals in correct structure
+isBullishNoWick = bullishNoBottomWick and marketStructure == 1
+isBearishNoWick = bearishNoTopWick and marketStructure == -1
 
 // ==================== COMPENSATION LINES ====================
 if (bullishNoBottomWick or bearishNoTopWick) and show_compensation
@@ -222,8 +221,6 @@ if (bullishNoBottomWick or bearishNoTopWick) and show_compensation
 
 // ==================== ATR ====================
 atr = ta.atr(14)
-
-// Session check with timezone
 isInSession = useSession ? not na(time(timeframe.period, tradingSession, sessionTimezone)) : true
 
 // ==================== STRATEGY VARIABLES ====================
@@ -248,15 +245,11 @@ var float activeTP = na
 var bool inLong = false
 var bool inShort = false
 
-// ==================== CANCEL OPPOSITE ORDERS ON STRUCTURE CHANGE ====================
-// If structure changes to bullish, cancel any pending short orders
+// ==================== CANCEL ORDERS ON STRUCTURE CHANGE ====================
 if chochBullish and shortPending
     strategy.cancel("Short")
-    shortEntryPrice := na
-    shortStopLoss := na
-    shortTakeProfit := na
-    shortOrderBars := 0
     shortPending := false
+    shortEntryPrice := na
     if not na(entryBox)
         box.delete(entryBox)
         entryBox := na
@@ -264,14 +257,10 @@ if chochBullish and shortPending
         box.delete(slBox)
         slBox := na
 
-// If structure changes to bearish, cancel any pending long orders
 if chochBearish and longPending
     strategy.cancel("Long")
-    longEntryPrice := na
-    longStopLoss := na
-    longTakeProfit := na
-    longOrderBars := 0
     longPending := false
+    longEntryPrice := na
     if not na(entryBox)
         box.delete(entryBox)
         entryBox := na
@@ -279,8 +268,10 @@ if chochBearish and longPending
         box.delete(slBox)
         slBox := na
 
-// ==================== LONG SETUP (ONLY IN BULLISH STRUCTURE) ====================
-if isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending and isBullishStructure
+// ==================== LONG SETUP ====================
+canGoLong = marketStructure == 1 and isInSession and strategy.position_size == 0 and not longPending and not shortPending
+
+if bullishNoBottomWick and canGoLong
     if not na(entryBox)
         box.delete(entryBox)
     if not na(slBox)
@@ -299,8 +290,10 @@ if isBullishNoWick and isInSession and strategy.position_size == 0 and not longP
     
     strategy.entry("Long", strategy.long, limit=longEntryPrice, qty=contracts)
 
-// ==================== SHORT SETUP (ONLY IN BEARISH STRUCTURE) ====================
-if isBearishNoWick and isInSession and strategy.position_size == 0 and not shortPending and not longPending and isBearishStructure
+// ==================== SHORT SETUP ====================
+canGoShort = marketStructure == -1 and isInSession and strategy.position_size == 0 and not shortPending and not longPending
+
+if bearishNoTopWick and canGoShort
     if not na(entryBox)
         box.delete(entryBox)
     if not na(slBox)
@@ -348,25 +341,22 @@ if strategy.position_size < 0 and not inShort
         box.delete(slBox)
         slBox := na
 
-if strategy.position_size == 0
-    if inLong or inShort
-        activeSL := na
-        activeTP := na
-        inLong := false
-        inShort := false
-        longEntryPrice := na
-        shortEntryPrice := na
+if strategy.position_size == 0 and (inLong or inShort)
+    activeSL := na
+    activeTP := na
+    inLong := false
+    inShort := false
+    longEntryPrice := na
+    shortEntryPrice := na
 
 // ==================== ORDER MANAGEMENT ====================
 if longPending and strategy.position_size == 0
-    longOrderBars := longOrderBars + 1
+    longOrderBars += 1
     if longOrderBars >= cancelAfter
         strategy.cancel("Long")
-        longEntryPrice := na
-        longStopLoss := na
-        longTakeProfit := na
-        longOrderBars := 0
         longPending := false
+        longEntryPrice := na
+        longOrderBars := 0
         if not na(entryBox)
             box.delete(entryBox)
             entryBox := na
@@ -375,14 +365,12 @@ if longPending and strategy.position_size == 0
             slBox := na
 
 if shortPending and strategy.position_size == 0
-    shortOrderBars := shortOrderBars + 1
+    shortOrderBars += 1
     if shortOrderBars >= cancelAfter
         strategy.cancel("Short")
-        shortEntryPrice := na
-        shortStopLoss := na
-        shortTakeProfit := na
-        shortOrderBars := 0
         shortPending := false
+        shortEntryPrice := na
+        shortOrderBars := 0
         if not na(entryBox)
             box.delete(entryBox)
             entryBox := na
@@ -391,49 +379,45 @@ if shortPending and strategy.position_size == 0
             slBox := na
 
 // ==================== VISUALIZATION ====================
-bgcolor(isBullishStructure ? color.new(color.green, 95) : isBearishStructure ? color.new(color.red, 95) : na)
-bgcolor(useSession and isInSession ? color.new(color.blue, 95) : na, title="Session Highlight")
+bgColor = marketStructure == 1 ? color.new(color.green, 95) : marketStructure == -1 ? color.new(color.red, 95) : na
+bgcolor(bgColor)
+bgcolor(useSession and isInSession ? color.new(color.blue, 95) : na, title="Session")
 
 plot(trendMethod == "EMA" ? ema : na, "EMA", color=color.orange, linewidth=2)
-
 plot(inLong or inShort ? activeSL : na, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2)
 plot(inLong or inShort ? activeTP : na, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
 plot(inLong or inShort ? strategy.position_avg_price : na, "Entry", color=color.blue, style=plot.style_linebr, linewidth=1)
 
-plotshape(bullishNoBottomWick, "Bullish No Wick (All)", shape.triangleup, location.belowbar, color.green, size=size.small)
-plotshape(bearishNoTopWick, "Bearish No Wick (All)", shape.triangledown, location.abovebar, color.red, size=size.small)
+// All No-Wick candles
+plotshape(bullishNoBottomWick, "Bullish No Wick", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(bearishNoTopWick, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
 
-plotshape(isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending, "Long Signal", shape.circle, location.belowbar, color.lime, size=size.tiny, offset=-1)
-plotshape(isBearishNoWick and isInSession and strategy.position_size == 0 and not shortPending and not longPending, "Short Signal", shape.circle, location.abovebar, color.fuchsia, size=size.tiny, offset=-1)
+// Valid signals only
+plotshape(isBullishNoWick and canGoLong, "Valid Long", shape.circle, location.belowbar, color.lime, size=size.tiny)
+plotshape(isBearishNoWick and canGoShort, "Valid Short", shape.circle, location.abovebar, color.fuchsia, size=size.tiny)
 
 // ==================== INFO TABLE ====================
-var table infoTable = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 80))
+var table infoTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80))
 if barstate.islast
-    table.cell(infoTable, 0, 0, "Filter Method", text_color=color.white)
-    table.cell(infoTable, 1, 0, trendMethod, text_color=color.yellow)
-    table.cell(infoTable, 0, 1, "Structure", text_color=color.white)
-    table.cell(infoTable, 1, 1, marketStructure == 1 ? "BULLISH ↑" : marketStructure == -1 ? "BEARISH ↓" : "NEUTRAL", text_color=marketStructure == 1 ? color.green : marketStructure == -1 ? color.red : color.gray)
-    table.cell(infoTable, 0, 2, "Trade Direction", text_color=color.white)
-    table.cell(infoTable, 1, 2, marketStructure == 1 ? "LONG ONLY" : marketStructure == -1 ? "SHORT ONLY" : "NONE", text_color=marketStructure == 1 ? color.green : marketStructure == -1 ? color.red : color.gray)
-    table.cell(infoTable, 0, 3, "Session", text_color=color.white)
-    table.cell(infoTable, 1, 3, useSession ? (isInSession ? "ACTIVE" : "INACTIVE") : "OFF", text_color=useSession ? (isInSession ? color.green : color.red) : color.gray)
-    table.cell(infoTable, 0, 4, "Last High", text_color=color.white)
-    table.cell(infoTable, 1, 4, trendMethod == "Market Structure" ? ((isHigherHigh ? "HH " : "LH ") + str.tostring(h0, "#.##")) : "-", text_color=isHigherHigh ? color.green : color.red)
-    table.cell(infoTable, 0, 5, "Last Low", text_color=color.white)
-    table.cell(infoTable, 1, 5, trendMethod == "Market Structure" ? ((isHigherLow ? "HL " : "LL ") + str.tostring(l0, "#.##")) : "-", text_color=isHigherLow ? color.green : color.red)
-    table.cell(infoTable, 0, 6, "No Wick", text_color=color.white)
-    table.cell(infoTable, 1, 6, bullishNoBottomWick ? "BULLISH ▲" : bearishNoTopWick ? "BEARISH ▼" : "-", text_color=bullishNoBottomWick ? color.green : bearishNoTopWick ? color.red : color.gray)
-    table.cell(infoTable, 0, 7, "Position", text_color=color.white)
-    table.cell(infoTable, 1, 7, inLong ? "LONG" : inShort ? "SHORT" : "FLAT", text_color=inLong ? color.green : inShort ? color.red : color.gray)
-    table.cell(infoTable, 0, 8, "Stop Loss", text_color=color.white)
-    table.cell(infoTable, 1, 8, not na(activeSL) ? str.tostring(activeSL, "#.##") : "-", text_color=color.red)
-    table.cell(infoTable, 0, 9, "Take Profit", text_color=color.white)
-    table.cell(infoTable, 1, 9, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
+    table.cell(infoTable, 0, 0, "Structure", text_color=color.white)
+    table.cell(infoTable, 1, 0, marketStructure == 1 ? "BULLISH ↑" : marketStructure == -1 ? "BEARISH ↓" : "NEUTRAL", text_color=marketStructure == 1 ? color.green : marketStructure == -1 ? color.red : color.gray)
+    table.cell(infoTable, 0, 1, "Trade", text_color=color.white)
+    table.cell(infoTable, 1, 1, marketStructure == 1 ? "LONG ONLY" : marketStructure == -1 ? "SHORT ONLY" : "NONE", text_color=marketStructure == 1 ? color.green : marketStructure == -1 ? color.red : color.gray)
+    table.cell(infoTable, 0, 2, "Last High", text_color=color.white)
+    table.cell(infoTable, 1, 2, (isHigherHigh ? "HH " : "LH ") + str.tostring(h0, "#.##"), text_color=isHigherHigh ? color.green : color.red)
+    table.cell(infoTable, 0, 3, "Last Low", text_color=color.white)
+    table.cell(infoTable, 1, 3, (isHigherLow ? "HL " : "LL ") + str.tostring(l0, "#.##"), text_color=isHigherLow ? color.green : color.red)
+    table.cell(infoTable, 0, 4, "Position", text_color=color.white)
+    table.cell(infoTable, 1, 4, inLong ? "LONG" : inShort ? "SHORT" : "FLAT", text_color=inLong ? color.green : inShort ? color.red : color.gray)
+    table.cell(infoTable, 0, 5, "Pending", text_color=color.white)
+    table.cell(infoTable, 1, 5, longPending ? "LONG" : shortPending ? "SHORT" : "-", text_color=longPending ? color.green : shortPending ? color.red : color.gray)
+    table.cell(infoTable, 0, 6, "SL", text_color=color.white)
+    table.cell(infoTable, 1, 6, not na(activeSL) ? str.tostring(activeSL, "#.##") : "-", text_color=color.red)
+    table.cell(infoTable, 0, 7, "TP", text_color=color.white)
+    table.cell(infoTable, 1, 7, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
 
 // ==================== ALERTS ====================
-alertcondition(chochBullish, "Bullish ChoCH", "Bullish Change of Character - Now LONG ONLY!")
-alertcondition(chochBearish, "Bearish ChoCH", "Bearish Change of Character - Now SHORT ONLY!")
-alertcondition(bosBullish, "Bullish BOS", "Bullish Break of Structure!")
-alertcondition(bosBearish, "Bearish BOS", "Bearish Break of Structure!")
-alertcondition(isBullishNoWick, "Long Signal", "Bullish No Wick in Bullish Structure - LONG!")
-alertcondition(isBearishNoWick, "Short Signal", "Bearish No Wick in Bearish Structure - SHORT!")
+alertcondition(chochBullish, "Bullish ChoCH", "ChoCH Bullish - LONG ONLY!")
+alertcondition(chochBearish, "Bearish ChoCH", "ChoCH Bearish - SHORT ONLY!")
+alertcondition(bosBullish, "Bullish BOS", "BOS Bullish!")
+alertcondition(bosBearish, "Bearish BOS", "BOS Bearish!")
