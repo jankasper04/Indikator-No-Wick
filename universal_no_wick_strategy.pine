@@ -53,6 +53,12 @@ showZones = input.bool(true, "Show Entry/SL Zones", group=visualSettings, displa
 zoneTransparency = input.int(80, "Zone Transparency", minval=0, maxval=100, group=visualSettings, display=display.data_window)
 showInfoTable = input.bool(true, "Show Info Table", group=visualSettings, display=display.data_window)
 
+// ==================== STATISTICS DASHBOARD ====================
+statsSettings = "Statistics Dashboard"
+showStatsDashboard = input.bool(true, "Show No-Wick Statistics Dashboard", group=statsSettings, display=display.data_window)
+statsLookback = input.int(100, "Lookback Period (Candles)", group=statsSettings, minval=10, maxval=500, display=display.data_window)
+statsDashboardPos = input.string("Bottom Right", "Dashboard Position", options=["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group=statsSettings, display=display.data_window)
+
 // ==================== EMA CALCULATION ====================
 ema = ta.ema(close, emaLength)
 isEmaUptrend = close > ema
@@ -214,9 +220,80 @@ if bosBearish and show_bos and trendMethod == "Market Structure"
 // ==================== NO WICK CANDLE DETECTION ====================
 bullishNoBottomWick = open == low and close > open
 bearishNoTopWick = open == high and close < open
+anyNoWick = bullishNoBottomWick or bearishNoTopWick
 
 isBullishNoWick = bullishNoBottomWick and marketStructure == 1
 isBearishNoWick = bearishNoTopWick and marketStructure == -1
+
+// ==================== NO WICK STATISTICS CALCULATION ====================
+// Function to count no-wick candles on different timeframes
+f_noWickStats(tf) =>
+    [o, h, l, c] = request.security(syminfo.tickerid, tf, [open, high, low, close], lookahead=barmerge.lookahead_off)
+    bullNW = o == l and c > o
+    bearNW = o == h and c < o
+    anyNW = bullNW or bearNW
+    [bullNW, bearNW, anyNW]
+
+// Get no-wick data for each timeframe
+[bull15, bear15, any15] = f_noWickStats("15")
+[bull30, bear30, any30] = f_noWickStats("30")
+[bull60, bear60, any60] = f_noWickStats("60")
+[bull240, bear240, any240] = f_noWickStats("240")
+
+// Count no-wick candles over lookback period
+// Current timeframe
+var int countBullCurrent = 0
+var int countBearCurrent = 0
+var int countTotalCurrent = 0
+
+countBullCurrent := math.sum(bullishNoBottomWick ? 1 : 0, statsLookback)
+countBearCurrent := math.sum(bearishNoTopWick ? 1 : 0, statsLookback)
+countTotalCurrent := countBullCurrent + countBearCurrent
+
+// M15
+var int countBull15 = 0
+var int countBear15 = 0
+countBull15 := math.sum(bull15 ? 1 : 0, statsLookback)
+countBear15 := math.sum(bear15 ? 1 : 0, statsLookback)
+
+// M30
+var int countBull30 = 0
+var int countBear30 = 0
+countBull30 := math.sum(bull30 ? 1 : 0, statsLookback)
+countBear30 := math.sum(bear30 ? 1 : 0, statsLookback)
+
+// H1
+var int countBull60 = 0
+var int countBear60 = 0
+countBull60 := math.sum(bull60 ? 1 : 0, statsLookback)
+countBear60 := math.sum(bear60 ? 1 : 0, statsLookback)
+
+// H4
+var int countBull240 = 0
+var int countBear240 = 0
+countBull240 := math.sum(bull240 ? 1 : 0, statsLookback)
+countBear240 := math.sum(bear240 ? 1 : 0, statsLookback)
+
+// Calculate percentages
+pctCurrent = statsLookback > 0 ? (countTotalCurrent / statsLookback) * 100 : 0
+pctBullCurrent = statsLookback > 0 ? (countBullCurrent / statsLookback) * 100 : 0
+pctBearCurrent = statsLookback > 0 ? (countBearCurrent / statsLookback) * 100 : 0
+
+pct15 = statsLookback > 0 ? ((countBull15 + countBear15) / statsLookback) * 100 : 0
+pctBull15 = statsLookback > 0 ? (countBull15 / statsLookback) * 100 : 0
+pctBear15 = statsLookback > 0 ? (countBear15 / statsLookback) * 100 : 0
+
+pct30 = statsLookback > 0 ? ((countBull30 + countBear30) / statsLookback) * 100 : 0
+pctBull30 = statsLookback > 0 ? (countBull30 / statsLookback) * 100 : 0
+pctBear30 = statsLookback > 0 ? (countBear30 / statsLookback) * 100 : 0
+
+pct60 = statsLookback > 0 ? ((countBull60 + countBear60) / statsLookback) * 100 : 0
+pctBull60 = statsLookback > 0 ? (countBull60 / statsLookback) * 100 : 0
+pctBear60 = statsLookback > 0 ? (countBear60 / statsLookback) * 100 : 0
+
+pct240 = statsLookback > 0 ? ((countBull240 + countBear240) / statsLookback) * 100 : 0
+pctBull240 = statsLookback > 0 ? (countBull240 / statsLookback) * 100 : 0
+pctBear240 = statsLookback > 0 ? (countBear240 / statsLookback) * 100 : 0
 
 // ==================== HTF START DETECTION ====================
 is30mStart = ta.change(time("30")) != 0
@@ -353,7 +430,6 @@ if strategy.position_size > 0 and not inLong
     activeTP := activeEntry + (signalAtr * atrMultiplier * tpMultiplier)
     strategy.exit("Long Exit", "Long", stop=activeSL, limit=activeTP)
     
-    // Draw historical trade lines
     if showHistoricalTrades
         line.new(bar_index, activeEntry, bar_index + 50, activeEntry, color=color.blue, width=1, style=line.style_solid)
         line.new(bar_index, activeSL, bar_index + 50, activeSL, color=color.red, width=1, style=line.style_dotted)
@@ -375,7 +451,6 @@ if strategy.position_size < 0 and not inShort
     activeTP := activeEntry - (signalAtr * atrMultiplier * tpMultiplier)
     strategy.exit("Short Exit", "Short", stop=activeSL, limit=activeTP)
     
-    // Draw historical trade lines
     if showHistoricalTrades
         line.new(bar_index, activeEntry, bar_index + 50, activeEntry, color=color.blue, width=1, style=line.style_solid)
         line.new(bar_index, activeSL, bar_index + 50, activeSL, color=color.red, width=1, style=line.style_dotted)
@@ -433,7 +508,6 @@ bgcolor(useSession and isInSession ? color.new(color.blue, 95) : na, title="Sess
 
 plot(trendMethod == "EMA" ? ema : na, "EMA", color=color.orange, linewidth=2)
 
-// Current active trade lines (extending)
 plot(inLong or inShort ? activeSL : na, "Current SL", color=color.red, style=plot.style_linebr, linewidth=2)
 plot(inLong or inShort ? activeTP : na, "Current TP", color=color.green, style=plot.style_linebr, linewidth=2)
 plot(inLong or inShort ? activeEntry : na, "Current Entry", color=color.blue, style=plot.style_linebr, linewidth=1)
@@ -478,6 +552,54 @@ if barstate.islast and showInfoTable
     table.cell(infoTable, 1, 7, not na(activeSL) ? str.tostring(activeSL, "#.##") : "-", text_color=color.red)
     table.cell(infoTable, 0, 8, "TP", text_color=color.white)
     table.cell(infoTable, 1, 8, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
+
+// ==================== STATISTICS DASHBOARD ====================
+dashPos = statsDashboardPos == "Top Left" ? position.top_left : statsDashboardPos == "Top Right" ? position.top_right : statsDashboardPos == "Bottom Left" ? position.bottom_left : position.bottom_right
+
+var table statsTable = table.new(dashPos, 5, 6, bgcolor=color.new(color.black, 70), border_width=1, border_color=color.gray)
+
+if barstate.islast and showStatsDashboard
+    // Header row
+    table.cell(statsTable, 0, 0, "TF", bgcolor=color.new(color.gray, 60), text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 1, 0, "Bull %", bgcolor=color.new(color.green, 70), text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 2, 0, "Bear %", bgcolor=color.new(color.red, 70), text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 3, 0, "Total %", bgcolor=color.new(color.blue, 70), text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 4, 0, "Count", bgcolor=color.new(color.gray, 60), text_color=color.white, text_size=size.small)
+    
+    // Current TF
+    table.cell(statsTable, 0, 1, timeframe.period, text_color=color.yellow, text_size=size.small)
+    table.cell(statsTable, 1, 1, str.tostring(pctBullCurrent, "#.#") + "%", text_color=color.green, text_size=size.small)
+    table.cell(statsTable, 2, 1, str.tostring(pctBearCurrent, "#.#") + "%", text_color=color.red, text_size=size.small)
+    table.cell(statsTable, 3, 1, str.tostring(pctCurrent, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 4, 1, str.tostring(countTotalCurrent), text_color=color.white, text_size=size.small)
+    
+    // M15
+    table.cell(statsTable, 0, 2, "M15", text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 1, 2, str.tostring(pctBull15, "#.#") + "%", text_color=color.green, text_size=size.small)
+    table.cell(statsTable, 2, 2, str.tostring(pctBear15, "#.#") + "%", text_color=color.red, text_size=size.small)
+    table.cell(statsTable, 3, 2, str.tostring(pct15, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 4, 2, str.tostring(countBull15 + countBear15), text_color=color.white, text_size=size.small)
+    
+    // M30
+    table.cell(statsTable, 0, 3, "M30", text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 1, 3, str.tostring(pctBull30, "#.#") + "%", text_color=color.green, text_size=size.small)
+    table.cell(statsTable, 2, 3, str.tostring(pctBear30, "#.#") + "%", text_color=color.red, text_size=size.small)
+    table.cell(statsTable, 3, 3, str.tostring(pct30, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 4, 3, str.tostring(countBull30 + countBear30), text_color=color.white, text_size=size.small)
+    
+    // H1
+    table.cell(statsTable, 0, 4, "H1", text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 1, 4, str.tostring(pctBull60, "#.#") + "%", text_color=color.green, text_size=size.small)
+    table.cell(statsTable, 2, 4, str.tostring(pctBear60, "#.#") + "%", text_color=color.red, text_size=size.small)
+    table.cell(statsTable, 3, 4, str.tostring(pct60, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 4, 4, str.tostring(countBull60 + countBear60), text_color=color.white, text_size=size.small)
+    
+    // H4
+    table.cell(statsTable, 0, 5, "H4", text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 1, 5, str.tostring(pctBull240, "#.#") + "%", text_color=color.green, text_size=size.small)
+    table.cell(statsTable, 2, 5, str.tostring(pctBear240, "#.#") + "%", text_color=color.red, text_size=size.small)
+    table.cell(statsTable, 3, 5, str.tostring(pct240, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(statsTable, 4, 5, str.tostring(countBull240 + countBear240), text_color=color.white, text_size=size.small)
 
 // ==================== ALERTS ====================
 alertcondition(chochBullish, "Bullish ChoCH", "ChoCH Bullish - LONG ONLY!")
