@@ -17,8 +17,8 @@ maxBodyAtr = input.float(3.0, "Max Body Size (x ATR)", minval=0.5, step=0.1, gro
 tradeSettings = "Trade Settings"
 contracts = input.int(1, "Number of Contracts", minval=1, group=tradeSettings)
 cancelAfter = input.int(10, "Cancel Order After X Candles", minval=1, group=tradeSettings)
-atrMultiplier = input.float(1.5, "ATR Multiplier for SL", minval=0.1, step=0.1, group=tradeSettings)
-tpMultiplier = input.float(2.0, "TP (x SL)", minval=0.1, step=0.1, group=tradeSettings)
+slAtrBuffer = input.float(0.5, "SL ATR Buffer (below/above structure)", minval=0, step=0.1, group=tradeSettings, tooltip="ATR multiplier added below last Low (Long) or above last High (Short)")
+tpRiskReward = input.float(2.0, "TP Risk:Reward Ratio", minval=0.5, step=0.1, group=tradeSettings, tooltip="Take Profit = Entry + (SL Distance x this value)")
 
 // ==================== SESSION INPUTS ====================
 sessionSettings = "Session Settings"
@@ -31,13 +31,11 @@ showZones = input.bool(true, "Show Entry/SL Zones", group=visualSettings)
 zoneTransparency = input.int(80, "Zone Transparency", minval=0, maxval=100, group=visualSettings)
 
 // ==================== MARKET STRUCTURE CALCULATION ====================
-// Arrays for swing points
 var float[] high_points_arr = array.new_float(5)
 var int[] high_index_arr = array.new_int(5)
 var float[] low_points_arr = array.new_float(5)
 var int[] low_index_arr = array.new_int(5)
 
-// ZigZag detection
 to_up = high >= ta.highest(zigzag_len)
 to_down = low <= ta.lowest(zigzag_len)
 
@@ -52,7 +50,6 @@ last_trend_down_since = ta.barssince(to_down[1])
 high_val = ta.highest(nz(last_trend_down_since > 0 ? last_trend_down_since : 1, 1))
 high_index = bar_index - ta.barssince(high_val == high)
 
-// Store swing points
 if ta.change(trend) != 0
     if trend == 1
         array.push(low_points_arr, low_val)
@@ -61,20 +58,17 @@ if ta.change(trend) != 0
         array.push(high_points_arr, high_val)
         array.push(high_index_arr, high_index)
 
-// Functions to get swing points
 f_get_high(ind) =>
     [array.get(high_points_arr, math.max(0, array.size(high_points_arr) - 1 - ind)), array.get(high_index_arr, math.max(0, array.size(high_index_arr) - 1 - ind))]
 
 f_get_low(ind) =>
     [array.get(low_points_arr, math.max(0, array.size(low_points_arr) - 1 - ind)), array.get(low_index_arr, math.max(0, array.size(low_index_arr) - 1 - ind))]
 
-// Get last swing points
 [h0, h0i] = f_get_high(0)
 [h1, h1i] = f_get_high(1)
 [l0, l0i] = f_get_low(0)
 [l1, l1i] = f_get_low(1)
 
-// Draw ZigZag
 if ta.change(trend) != 0 and show_zigzag
     if trend == 1
         line.new(h0i, h0, l0i, l0, color=color.gray, width=1)
@@ -82,20 +76,12 @@ if ta.change(trend) != 0 and show_zigzag
         line.new(l0i, l0, h0i, h0, color=color.gray, width=1)
 
 // ==================== MARKET STRUCTURE TREND ====================
-// Higher High: current high > previous high
-// Higher Low: current low > previous low
-// Lower High: current high < previous high
-// Lower Low: current low < previous low
-
 isHigherHigh = h0 > h1
 isHigherLow = l0 > l1
 isLowerHigh = h0 < h1
 isLowerLow = l0 < l1
 
-// Uptrend = Higher Highs AND Higher Lows
-// Downtrend = Lower Highs AND Lower Lows
-var int marketStructure = 0  // 0 = neutral, 1 = bullish, -1 = bearish
-
+var int marketStructure = 0
 if isHigherHigh and isHigherLow
     marketStructure := 1
 else if isLowerHigh and isLowerLow
@@ -109,14 +95,14 @@ var label lastHighLabel = na
 var label lastLowLabel = na
 
 if ta.change(trend) != 0 and show_hh_ll
-    if trend == -1  // New high formed
+    if trend == -1
         if not na(lastHighLabel)
             label.delete(lastHighLabel)
         labelText = isHigherHigh ? "HH" : "LH"
         labelColor = isHigherHigh ? color.green : color.red
         lastHighLabel := label.new(h0i, h0, labelText, color=color.new(color.black, 100), style=label.style_label_down, textcolor=labelColor, size=size.small)
     
-    if trend == 1  // New low formed
+    if trend == 1
         if not na(lastLowLabel)
             label.delete(lastLowLabel)
         labelText = isHigherLow ? "HL" : "LL"
@@ -137,13 +123,11 @@ upperWickPercent = upperWick / safeTotal
 lowerWickPercent = lowerWick / safeTotal
 bodyAtrRatio = bodySize / atr
 
-// Bullish No Wick: Green candle with small/no lower wick (in bullish structure)
 isBullishCandle = close > open
 hasSmallLowerWick = lowerWickPercent <= wickThreshold
 validBullishBody = bodyAtrRatio >= minBodyAtr and bodyAtrRatio <= maxBodyAtr
 isBullishNoWick = isBullishCandle and hasSmallLowerWick and validBullishBody and isBullishStructure
 
-// Bearish No Wick: Red candle with small/no upper wick (in bearish structure)
 isBearishCandle = close < open
 hasSmallUpperWick = upperWickPercent <= wickThreshold
 validBearishBody = bodyAtrRatio >= minBodyAtr and bodyAtrRatio <= maxBodyAtr
@@ -165,6 +149,7 @@ var int shortOrderBars = 0
 var bool shortPending = false
 
 var float signalAtr = na
+var float structureSL = na
 var box entryBox = na
 var box slBox = na
 
@@ -174,6 +159,8 @@ var bool inLong = false
 var bool inShort = false
 
 // ==================== LONG SETUP ====================
+// SL = Last Low - ATR Buffer
+// TP = Entry + (Entry - SL) * RR Ratio
 if isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending
     if not na(entryBox)
         box.delete(entryBox)
@@ -182,8 +169,10 @@ if isBullishNoWick and isInSession and strategy.position_size == 0 and not longP
     
     longEntryPrice := open
     signalAtr := atr
-    longStopLoss := longEntryPrice - (signalAtr * atrMultiplier)
-    longTakeProfit := longEntryPrice + (signalAtr * atrMultiplier * tpMultiplier)
+    structureSL := l0  // Last Low of structure
+    longStopLoss := structureSL - (signalAtr * slAtrBuffer)  // SL below last Low + ATR buffer
+    slDistance = longEntryPrice - longStopLoss
+    longTakeProfit := longEntryPrice + (slDistance * tpRiskReward)  // TP based on Risk:Reward
     longOrderBars := 0
     longPending := true
     
@@ -194,6 +183,8 @@ if isBullishNoWick and isInSession and strategy.position_size == 0 and not longP
     strategy.entry("Long", strategy.long, limit=longEntryPrice, qty=contracts)
 
 // ==================== SHORT SETUP ====================
+// SL = Last High + ATR Buffer
+// TP = Entry - (SL - Entry) * RR Ratio
 if isBearishNoWick and isInSession and strategy.position_size == 0 and not shortPending and not longPending
     if not na(entryBox)
         box.delete(entryBox)
@@ -202,8 +193,10 @@ if isBearishNoWick and isInSession and strategy.position_size == 0 and not short
     
     shortEntryPrice := open
     signalAtr := atr
-    shortStopLoss := shortEntryPrice + (signalAtr * atrMultiplier)
-    shortTakeProfit := shortEntryPrice - (signalAtr * atrMultiplier * tpMultiplier)
+    structureSL := h0  // Last High of structure
+    shortStopLoss := structureSL + (signalAtr * slAtrBuffer)  // SL above last High + ATR buffer
+    slDistance = shortStopLoss - shortEntryPrice
+    shortTakeProfit := shortEntryPrice - (slDistance * tpRiskReward)  // TP based on Risk:Reward
     shortOrderBars := 0
     shortPending := true
     
@@ -218,8 +211,10 @@ if strategy.position_size > 0 and not inLong
     inLong := true
     inShort := false
     longPending := false
-    activeSL := strategy.position_avg_price - (signalAtr * atrMultiplier)
-    activeTP := strategy.position_avg_price + (signalAtr * atrMultiplier * tpMultiplier)
+    // Recalculate SL/TP based on actual entry price
+    activeSL := structureSL - (signalAtr * slAtrBuffer)
+    slDist = strategy.position_avg_price - activeSL
+    activeTP := strategy.position_avg_price + (slDist * tpRiskReward)
     strategy.exit("Long Exit", "Long", stop=activeSL, limit=activeTP)
     if not na(entryBox)
         box.delete(entryBox)
@@ -232,8 +227,10 @@ if strategy.position_size < 0 and not inShort
     inShort := true
     inLong := false
     shortPending := false
-    activeSL := strategy.position_avg_price + (signalAtr * atrMultiplier)
-    activeTP := strategy.position_avg_price - (signalAtr * atrMultiplier * tpMultiplier)
+    // Recalculate SL/TP based on actual entry price
+    activeSL := structureSL + (signalAtr * slAtrBuffer)
+    slDist = activeSL - strategy.position_avg_price
+    activeTP := strategy.position_avg_price - (slDist * tpRiskReward)
     strategy.exit("Short Exit", "Short", stop=activeSL, limit=activeTP)
     if not na(entryBox)
         box.delete(entryBox)
@@ -250,6 +247,7 @@ if strategy.position_size == 0
         inShort := false
         longEntryPrice := na
         shortEntryPrice := na
+        structureSL := na
 
 // ==================== ORDER MANAGEMENT ====================
 if longPending and strategy.position_size == 0
@@ -285,8 +283,10 @@ if shortPending and strategy.position_size == 0
             slBox := na
 
 // ==================== VISUALIZATION ====================
-// Market Structure Background
 bgcolor(isBullishStructure ? color.new(color.green, 95) : isBearishStructure ? color.new(color.red, 95) : na)
+
+// Plot structure level used for SL
+plot(longPending ? structureSL : shortPending ? structureSL : na, "Structure Level", color=color.orange, style=plot.style_linebr, linewidth=1)
 
 // Plot active SL/TP lines
 plot(inLong or inShort ? activeSL : na, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2)
@@ -298,7 +298,7 @@ plotshape(isBullishNoWick and isInSession and strategy.position_size == 0 and no
 plotshape(isBearishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
 
 // ==================== INFO TABLE ====================
-var table infoTable = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 80))
+var table infoTable = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 80))
 if barstate.islast
     table.cell(infoTable, 0, 0, "Structure", text_color=color.white)
     table.cell(infoTable, 1, 0, isBullishStructure ? "BULLISH (HH+HL)" : isBearishStructure ? "BEARISH (LH+LL)" : "NEUTRAL", text_color=isBullishStructure ? color.green : isBearishStructure ? color.red : color.gray)
@@ -308,7 +308,9 @@ if barstate.islast
     table.cell(infoTable, 1, 2, (isHigherLow ? "HL " : "LL ") + str.tostring(l0, "#.##"), text_color=isHigherLow ? color.green : color.red)
     table.cell(infoTable, 0, 3, "Position", text_color=color.white)
     table.cell(infoTable, 1, 3, inLong ? "LONG" : inShort ? "SHORT" : "FLAT", text_color=inLong ? color.green : inShort ? color.red : color.gray)
-    table.cell(infoTable, 0, 4, "Stop Loss", text_color=color.white)
-    table.cell(infoTable, 1, 4, not na(activeSL) ? str.tostring(activeSL, "#.##") : "-", text_color=color.red)
-    table.cell(infoTable, 0, 5, "Take Profit", text_color=color.white)
-    table.cell(infoTable, 1, 5, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
+    table.cell(infoTable, 0, 4, "Entry", text_color=color.white)
+    table.cell(infoTable, 1, 4, strategy.position_size != 0 ? str.tostring(strategy.position_avg_price, "#.##") : "-", text_color=color.blue)
+    table.cell(infoTable, 0, 5, "Stop Loss", text_color=color.white)
+    table.cell(infoTable, 1, 5, not na(activeSL) ? str.tostring(activeSL, "#.##") : "-", text_color=color.red)
+    table.cell(infoTable, 0, 6, "Take Profit", text_color=color.white)
+    table.cell(infoTable, 1, 6, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
