@@ -27,7 +27,11 @@ bearishNoWickColor = input.color(color.fuchsia, "Bearish No-Wick Color", group=n
 htfSettings = "HTF Marker Settings"
 show_htf_marker = input.bool(true, "Show HTF Start Marker", group=htfSettings)
 show_30m_marker = input.bool(true, "Mark 30min Candle Start", group=htfSettings)
+color_30m = input.color(color.yellow, "30min Marker Color", group=htfSettings)
 show_1h_marker = input.bool(true, "Mark 1h Candle Start", group=htfSettings)
+color_1h = input.color(color.orange, "1h Marker Color", group=htfSettings)
+show_4h_marker = input.bool(true, "Mark 4h Candle Start", group=htfSettings)
+color_4h = input.color(color.aqua, "4h Marker Color", group=htfSettings)
 
 // ==================== TRADE INPUTS ====================
 tradeSettings = "Trade Settings"
@@ -213,15 +217,22 @@ isBullishNoWick = bullishNoBottomWick and marketStructure == 1
 isBearishNoWick = bearishNoTopWick and marketStructure == -1
 
 // ==================== HTF START DETECTION ====================
-// Check if current bar is the start of a 30min or 1h candle
 is30mStart = ta.change(time("30")) != 0
 is1hStart = ta.change(time("60")) != 0
+is4hStart = ta.change(time("240")) != 0
 
-isHTFStart = (show_30m_marker and is30mStart) or (show_1h_marker and is1hStart)
+// Determine highest priority HTF
+htfPriority = is4hStart and show_4h_marker ? 3 : is1hStart and show_1h_marker ? 2 : is30mStart and show_30m_marker ? 1 : 0
 
 // No-Wick at HTF start
-bullishNoWickHTF = bullishNoBottomWick and isHTFStart
-bearishNoWickHTF = bearishNoTopWick and isHTFStart
+bullishNoWick30m = bullishNoBottomWick and is30mStart and show_30m_marker and htfPriority == 1
+bearishNoWick30m = bearishNoTopWick and is30mStart and show_30m_marker and htfPriority == 1
+
+bullishNoWick1h = bullishNoBottomWick and is1hStart and show_1h_marker and htfPriority == 2
+bearishNoWick1h = bearishNoTopWick and is1hStart and show_1h_marker and htfPriority == 2
+
+bullishNoWick4h = bullishNoBottomWick and is4hStart and show_4h_marker
+bearishNoWick4h = bearishNoTopWick and is4hStart and show_4h_marker
 
 // ==================== COLOR NO-WICK CANDLES ====================
 noWickColor = bullishNoBottomWick ? bullishNoWickColor : bearishNoTopWick ? bearishNoWickColor : na
@@ -407,9 +418,17 @@ plot(inLong or inShort ? strategy.position_avg_price : na, "Entry", color=color.
 plotshape(bullishNoBottomWick, "Bullish No Wick", shape.triangleup, location.belowbar, color.green, size=size.small)
 plotshape(bearishNoTopWick, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
 
-// HTF Start Markers (Diamond above/below the triangle)
-plotshape(bullishNoWickHTF and show_htf_marker, "Bullish HTF", shape.diamond, location.belowbar, color.yellow, size=size.tiny, offset=0)
-plotshape(bearishNoWickHTF and show_htf_marker, "Bearish HTF", shape.diamond, location.abovebar, color.yellow, size=size.tiny, offset=0)
+// HTF Start Markers - 30min (Yellow Diamond)
+plotshape(bullishNoWick30m and show_htf_marker, "Bullish 30m", shape.diamond, location.belowbar, color_30m, size=size.tiny)
+plotshape(bearishNoWick30m and show_htf_marker, "Bearish 30m", shape.diamond, location.abovebar, color_30m, size=size.tiny)
+
+// HTF Start Markers - 1h (Orange Diamond)
+plotshape(bullishNoWick1h and show_htf_marker, "Bullish 1h", shape.diamond, location.belowbar, color_1h, size=size.tiny)
+plotshape(bearishNoWick1h and show_htf_marker, "Bearish 1h", shape.diamond, location.abovebar, color_1h, size=size.tiny)
+
+// HTF Start Markers - 4h (Aqua Star) - Higher priority, always shown
+plotshape(bullishNoWick4h and show_htf_marker, "Bullish 4h", shape.star, location.belowbar, color_4h, size=size.small)
+plotshape(bearishNoWick4h and show_htf_marker, "Bearish 4h", shape.star, location.abovebar, color_4h, size=size.small)
 
 // Valid signals
 plotshape(isBullishNoWick and canGoLong, "Valid Long", shape.circle, location.belowbar, color.lime, size=size.tiny)
@@ -418,12 +437,15 @@ plotshape(isBearishNoWick and canGoShort, "Valid Short", shape.circle, location.
 // ==================== INFO TABLE ====================
 var table infoTable = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80))
 if barstate.islast
+    htfText = is4hStart ? "4H ★" : is1hStart ? "1H ◆" : is30mStart ? "30M ◆" : "-"
+    htfColor = is4hStart ? color_4h : is1hStart ? color_1h : is30mStart ? color_30m : color.gray
+    
     table.cell(infoTable, 0, 0, "Structure", text_color=color.white)
     table.cell(infoTable, 1, 0, marketStructure == 1 ? "BULLISH ↑" : marketStructure == -1 ? "BEARISH ↓" : "NEUTRAL", text_color=marketStructure == 1 ? color.green : marketStructure == -1 ? color.red : color.gray)
     table.cell(infoTable, 0, 1, "Trade", text_color=color.white)
     table.cell(infoTable, 1, 1, marketStructure == 1 ? "LONG ONLY" : marketStructure == -1 ? "SHORT ONLY" : "NONE", text_color=marketStructure == 1 ? color.green : marketStructure == -1 ? color.red : color.gray)
     table.cell(infoTable, 0, 2, "HTF Start", text_color=color.white)
-    table.cell(infoTable, 1, 2, is1hStart ? "1H ◆" : is30mStart ? "30M ◆" : "-", text_color=color.yellow)
+    table.cell(infoTable, 1, 2, htfText, text_color=htfColor)
     table.cell(infoTable, 0, 3, "Last High", text_color=color.white)
     table.cell(infoTable, 1, 3, (isHigherHigh ? "HH " : "LH ") + str.tostring(h0, "#.##"), text_color=isHigherHigh ? color.green : color.red)
     table.cell(infoTable, 0, 4, "Last Low", text_color=color.white)
@@ -442,5 +464,6 @@ alertcondition(chochBullish, "Bullish ChoCH", "ChoCH Bullish - LONG ONLY!")
 alertcondition(chochBearish, "Bearish ChoCH", "ChoCH Bearish - SHORT ONLY!")
 alertcondition(bosBullish, "Bullish BOS", "BOS Bullish!")
 alertcondition(bosBearish, "Bearish BOS", "BOS Bearish!")
-alertcondition(bullishNoWickHTF, "Bullish No-Wick HTF", "Bullish No-Wick at HTF Start!")
-alertcondition(bearishNoWickHTF, "Bearish No-Wick HTF", "Bearish No-Wick at HTF Start!")
+alertcondition(bullishNoWick4h or bearishNoWick4h, "No-Wick 4H Start", "No-Wick at 4H candle start!")
+alertcondition(bullishNoWick1h or bearishNoWick1h, "No-Wick 1H Start", "No-Wick at 1H candle start!")
+alertcondition(bullishNoWick30m or bearishNoWick30m, "No-Wick 30M Start", "No-Wick at 30M candle start!")
