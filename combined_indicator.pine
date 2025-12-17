@@ -1,0 +1,274 @@
+// Combined Indicator: VWAP + EMA Trend Bars + Sessions
+// Combines three popular indicators into one unified script
+//@version=6
+
+indicator(title="VWAP + EMA Trend + Sessions", shorttitle="Combined Indicator", overlay=true, timeframe="", timeframe_gaps=true)
+
+// ============================================
+// VWAP SETTINGS
+// ============================================
+VWAP_GROUP = "VWAP Settings"
+showVWAP = input.bool(true, title="Show VWAP", group=VWAP_GROUP)
+hideonDWM = input.bool(false, title="Hide VWAP on 1D or Above", group=VWAP_GROUP, display=display.data_window)
+var anchor = input.string(defval="Session", title="Anchor Period",
+     options=["Session", "Week", "Month", "Quarter", "Year", "Decade", "Century", "Earnings", "Dividends", "Splits"], group=VWAP_GROUP)
+src = input.source(title="Source", defval=hlc3, group=VWAP_GROUP, display=display.data_window)
+vwapOffset = input.int(0, title="Offset", group=VWAP_GROUP, minval=0, display=display.data_window)
+
+// VWAP Bands Settings
+BANDS_GROUP = "VWAP Bands Settings"
+CALC_MODE_TOOLTIP = "Determines the units used to calculate the distance of the bands. When 'Percentage' is selected, a multiplier of 1 means 1%."
+calcModeInput = input.string("Standard Deviation", "Bands Calculation Mode", options=["Standard Deviation", "Percentage"], group=BANDS_GROUP, tooltip=CALC_MODE_TOOLTIP, display=display.data_window)
+showBand_1 = input.bool(true, title="", group=BANDS_GROUP, inline="band_1", display=display.data_window)
+bandMult_1 = input.float(1.0, title="Bands Multiplier #1", group=BANDS_GROUP, inline="band_1", step=0.5, minval=0, display=display.data_window)
+showBand_2 = input.bool(false, title="", group=BANDS_GROUP, inline="band_2", display=display.data_window)
+bandMult_2 = input.float(2.0, title="Bands Multiplier #2", group=BANDS_GROUP, inline="band_2", step=0.5, minval=0, display=display.data_window)
+showBand_3 = input.bool(false, title="", group=BANDS_GROUP, inline="band_3", display=display.data_window)
+bandMult_3 = input.float(3.0, title="Bands Multiplier #3", group=BANDS_GROUP, inline="band_3", step=0.5, minval=0, display=display.data_window)
+
+// ============================================
+// EMA TREND BARS SETTINGS
+// ============================================
+EMA_GROUP = "EMA Trend Settings"
+showEMA = input.bool(true, title="Show EMA", group=EMA_GROUP)
+emaLength = input.int(34, minval=1, maxval=300, title="EMA Length", group=EMA_GROUP)
+useEmaBarColor = input.bool(true, title="Color Bars Based on EMA Trend", group=EMA_GROUP)
+emaUpColor = input.color(color.lime, title="EMA Uptrend Color", group=EMA_GROUP)
+emaDownColor = input.color(color.red, title="EMA Downtrend Color", group=EMA_GROUP)
+
+// ============================================
+// SESSIONS SETTINGS
+// ============================================
+SESSIONS_GROUP = "Sessions Settings"
+showSessions = input.bool(true, title="Show Sessions", group=SESSIONS_GROUP)
+bgColor = input.bool(false, "Activate High/Low View (instead of Background)", group=SESSIONS_GROUP)
+res = input.timeframe("D", "Resolution", group=SESSIONS_GROUP)
+
+// Session Time Inputs
+SESSIONS_TIME_GROUP = "Session Times"
+london = input.session("0300-1200:1234567", "London Session", group=SESSIONS_TIME_GROUP)
+ny = input.session("0800-1700:1234567", "New York Session", group=SESSIONS_TIME_GROUP)
+tokyo = input.session("2000-0400:1234567", "Tokyo Session", group=SESSIONS_TIME_GROUP)
+sydney = input.session("1700-0200:1234567", "Sydney Session", group=SESSIONS_TIME_GROUP)
+
+// Session Toggle Inputs
+SESSIONS_TOGGLE_GROUP = "Session Toggles"
+showLondon = input.bool(true, "London Session", group=SESSIONS_TOGGLE_GROUP)
+showNY = input.bool(true, "New York Session", group=SESSIONS_TOGGLE_GROUP)
+showTokyo = input.bool(true, "Tokyo Session", group=SESSIONS_TOGGLE_GROUP)
+showSydney = input.bool(false, "Sydney Session", group=SESSIONS_TOGGLE_GROUP)
+
+// Session Colors
+SESSIONS_COLOR_GROUP = "Session Colors"
+LondonColor = input.color(color.new(color.green, 90), "London Color", group=SESSIONS_COLOR_GROUP)
+NYColor = input.color(color.new(color.red, 90), "New York Color", group=SESSIONS_COLOR_GROUP)
+AsiaColor = input.color(color.new(color.yellow, 90), "Tokyo Color", group=SESSIONS_COLOR_GROUP)
+SydneyColor = input.color(color.new(color.blue, 90), "Sydney Color", group=SESSIONS_COLOR_GROUP)
+
+// ============================================
+// VWAP CALCULATIONS
+// ============================================
+cumVolume = ta.cum(volume)
+if barstate.islast and cumVolume == 0
+    runtime.error("No volume is provided by the data vendor.")
+
+new_earnings = request.earnings(syminfo.tickerid, earnings.actual, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
+new_dividends = request.dividends(syminfo.tickerid, dividends.gross, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
+new_split = request.splits(syminfo.tickerid, splits.denominator, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
+
+isNewPeriod = switch anchor
+    "Earnings"  => not na(new_earnings)
+    "Dividends" => not na(new_dividends)
+    "Splits"    => not na(new_split)
+    "Session"   => timeframe.change("D")
+    "Week"      => timeframe.change("W")
+    "Month"     => timeframe.change("M")
+    "Quarter"   => timeframe.change("3M")
+    "Year"      => timeframe.change("12M")
+    "Decade"    => timeframe.change("12M") and year % 10 == 0
+    "Century"   => timeframe.change("12M") and year % 100 == 0
+    => false
+
+isEsdAnchor = anchor == "Earnings" or anchor == "Dividends" or anchor == "Splits"
+if na(src[1]) and not isEsdAnchor
+    isNewPeriod := true
+
+float vwapValue = na
+float upperBandValue1 = na
+float lowerBandValue1 = na
+float upperBandValue2 = na
+float lowerBandValue2 = na
+float upperBandValue3 = na
+float lowerBandValue3 = na
+
+if not (hideonDWM and timeframe.isdwm) and showVWAP
+    [_vwap, _stdevUpper, _] = ta.vwap(src, isNewPeriod, 1)
+    vwapValue := _vwap
+    stdevAbs = _stdevUpper - _vwap
+    bandBasis = calcModeInput == "Standard Deviation" ? stdevAbs : _vwap * 0.01
+    upperBandValue1 := _vwap + bandBasis * bandMult_1
+    lowerBandValue1 := _vwap - bandBasis * bandMult_1
+    upperBandValue2 := _vwap + bandBasis * bandMult_2
+    lowerBandValue2 := _vwap - bandBasis * bandMult_2
+    upperBandValue3 := _vwap + bandBasis * bandMult_3
+    lowerBandValue3 := _vwap - bandBasis * bandMult_3
+
+// ============================================
+// EMA CALCULATIONS
+// ============================================
+usedEma = ta.ema(close, emaLength)
+
+emaUpTrend = hlc3 >= usedEma
+emaDownTrend = hlc3 < usedEma
+
+emaColor = emaUpTrend ? emaUpColor : emaDownColor
+
+// Bar coloring based on EMA trend
+barcolor(useEmaBarColor ? (emaUpTrend ? emaUpColor : emaDownTrend ? emaDownColor : na) : na)
+
+// ============================================
+// SESSIONS CALCULATIONS
+// ============================================
+is_newbar(sess) =>
+    t = time(res, sess, "America/New_York")
+    na(t[1]) and not na(t) or t[1] < t
+
+is_session(sess) =>
+    not na(time(timeframe.period, sess, "America/New_York"))
+
+// London Session
+londonNewbar = is_newbar(london)
+londonSession = is_session(london)
+
+float londonLow = na
+londonLow := if londonSession
+    if londonNewbar
+        low
+    else
+        math.min(londonLow[1], low)
+else
+    londonLow[1]
+
+float londonHigh = na
+londonHigh := if londonSession
+    if londonNewbar
+        high
+    else
+        math.max(londonHigh[1], high)
+else
+    londonHigh[1]
+
+// New York Session
+nyNewbar = is_newbar(ny)
+nySession = is_session(ny)
+
+float nyLow = na
+nyLow := if nySession
+    if nyNewbar
+        low
+    else
+        math.min(nyLow[1], low)
+else
+    nyLow[1]
+
+float nyHigh = na
+nyHigh := if nySession
+    if nyNewbar
+        high
+    else
+        math.max(nyHigh[1], high)
+else
+    nyHigh[1]
+
+// Tokyo Session
+tokyoNewbar = is_newbar(tokyo)
+tokyoSession = is_session(tokyo)
+
+float tokyoLow = na
+tokyoLow := if tokyoSession
+    if tokyoNewbar
+        low
+    else
+        math.min(tokyoLow[1], low)
+else
+    tokyoLow[1]
+
+float tokyoHigh = na
+tokyoHigh := if tokyoSession
+    if tokyoNewbar
+        high
+    else
+        math.max(tokyoHigh[1], high)
+else
+    tokyoHigh[1]
+
+// Sydney Session
+sydneyNewbar = is_newbar(sydney)
+sydneySession = is_session(sydney)
+
+float sydneyLow = na
+sydneyLow := if sydneySession
+    if sydneyNewbar
+        low
+    else
+        math.min(sydneyLow[1], low)
+else
+    sydneyLow[1]
+
+float sydneyHigh = na
+sydneyHigh := if sydneySession
+    if sydneyNewbar
+        high
+    else
+        math.max(sydneyHigh[1], high)
+else
+    sydneyHigh[1]
+
+// ============================================
+// PLOTS - VWAP
+// ============================================
+plot(showVWAP ? vwapValue : na, title="VWAP", color=#2962FF, offset=vwapOffset)
+
+upperBand_1 = plot(showVWAP ? upperBandValue1 : na, title="Upper Band #1", color=color.green, offset=vwapOffset, display=showBand_1 ? display.all : display.none, editable=showBand_1)
+lowerBand_1 = plot(showVWAP ? lowerBandValue1 : na, title="Lower Band #1", color=color.green, offset=vwapOffset, display=showBand_1 ? display.all : display.none, editable=showBand_1)
+fill(upperBand_1, lowerBand_1, title="Bands Fill #1", color=color.new(color.green, 95), display=showBand_1 ? display.all : display.none, editable=showBand_1)
+
+upperBand_2 = plot(showVWAP ? upperBandValue2 : na, title="Upper Band #2", color=color.olive, offset=vwapOffset, display=showBand_2 ? display.all : display.none, editable=showBand_2)
+lowerBand_2 = plot(showVWAP ? lowerBandValue2 : na, title="Lower Band #2", color=color.olive, offset=vwapOffset, display=showBand_2 ? display.all : display.none, editable=showBand_2)
+fill(upperBand_2, lowerBand_2, title="Bands Fill #2", color=color.new(color.olive, 95), display=showBand_2 ? display.all : display.none, editable=showBand_2)
+
+upperBand_3 = plot(showVWAP ? upperBandValue3 : na, title="Upper Band #3", color=color.teal, offset=vwapOffset, display=showBand_3 ? display.all : display.none, editable=showBand_3)
+lowerBand_3 = plot(showVWAP ? lowerBandValue3 : na, title="Lower Band #3", color=color.teal, offset=vwapOffset, display=showBand_3 ? display.all : display.none, editable=showBand_3)
+fill(upperBand_3, lowerBand_3, title="Bands Fill #3", color=color.new(color.teal, 95), display=showBand_3 ? display.all : display.none, editable=showBand_3)
+
+// ============================================
+// PLOTS - EMA
+// ============================================
+plot(showEMA ? usedEma : na, title="EMA", style=plot.style_line, linewidth=3, color=emaColor)
+
+// ============================================
+// PLOTS - SESSIONS
+// ============================================
+// London
+plotLL = plot(showSessions and showLondon and bgColor ? londonLow : na, color=color.new(#000000, 100), title="London Low")
+plotLH = plot(showSessions and showLondon and bgColor ? londonHigh : na, color=color.new(#000000, 100), title="London High")
+fill(plotLL, plotLH, color=londonSession and showLondon and showSessions and bgColor ? LondonColor : na, title="London Fill")
+bgcolor(londonSession and showLondon and showSessions and not bgColor ? LondonColor : na, title="London Background")
+
+// New York
+plotNYL = plot(showSessions and showNY and bgColor ? nyLow : na, color=color.new(#000000, 100), title="NY Low")
+plotNYH = plot(showSessions and showNY and bgColor ? nyHigh : na, color=color.new(#000000, 100), title="NY High")
+fill(plotNYL, plotNYH, color=nySession and showNY and showSessions and bgColor ? NYColor : na, title="NY Fill")
+bgcolor(nySession and showNY and showSessions and not bgColor ? NYColor : na, title="NY Background")
+
+// Tokyo
+plotTL = plot(showSessions and showTokyo and bgColor ? tokyoLow : na, color=color.new(#000000, 100), title="Tokyo Low")
+plotTH = plot(showSessions and showTokyo and bgColor ? tokyoHigh : na, color=color.new(#000000, 100), title="Tokyo High")
+fill(plotTL, plotTH, color=tokyoSession and showTokyo and showSessions and bgColor ? AsiaColor : na, title="Tokyo Fill")
+bgcolor(tokyoSession and showTokyo and showSessions and not bgColor ? AsiaColor : na, title="Tokyo Background")
+
+// Sydney
+plotSL = plot(showSessions and showSydney and bgColor ? sydneyLow : na, color=color.new(#000000, 100), title="Sydney Low")
+plotSH = plot(showSessions and showSydney and bgColor ? sydneyHigh : na, color=color.new(#000000, 100), title="Sydney High")
+fill(plotSL, plotSH, color=sydneySession and showSydney and showSessions and bgColor ? SydneyColor : na, title="Sydney Fill")
+bgcolor(sydneySession and showSydney and showSessions and not bgColor ? SydneyColor : na, title="Sydney Background")
