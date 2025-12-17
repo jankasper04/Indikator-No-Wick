@@ -3,53 +3,55 @@ strategy("Universal No Wick Market Structure Strategy", overlay=true, initial_ca
 
 // ==================== TREND FILTER METHOD ====================
 filterSettings = "Trend Filter Settings"
-trendMethod = input.string("Market Structure", "Trend Filter Method", options=["Market Structure", "EMA"], group=filterSettings)
-emaLength = input.int(50, "EMA Length", group=filterSettings, minval=5)
+trendMethod = input.string("Market Structure", "Trend Filter Method", options=["Market Structure", "EMA"], group=filterSettings, display=display.data_window)
+emaLength = input.int(50, "EMA Length", group=filterSettings, minval=5, display=display.data_window)
 
 // ==================== MARKET STRUCTURE INPUTS ====================
 msSettings = "Market Structure Settings"
-zigzag_len = input.int(9, "ZigZag Length", group=msSettings, minval=3)
-show_zigzag = input.bool(true, "Show ZigZag", group=msSettings)
-show_hh_ll = input.bool(true, "Show HH/HL/LH/LL Labels", group=msSettings)
-show_choch = input.bool(true, "Show Change of Character (ChoCH)", group=msSettings)
-show_bos = input.bool(true, "Show Break of Structure (BOS)", group=msSettings)
+zigzag_len = input.int(9, "ZigZag Length", group=msSettings, minval=3, display=display.data_window)
+show_zigzag = input.bool(true, "Show ZigZag", group=msSettings, display=display.data_window)
+show_hh_ll = input.bool(true, "Show HH/HL/LH/LL Labels", group=msSettings, display=display.data_window)
+show_choch = input.bool(true, "Show Change of Character (ChoCH)", group=msSettings, display=display.data_window)
+show_bos = input.bool(true, "Show Break of Structure (BOS)", group=msSettings, display=display.data_window)
 
 // ==================== NO WICK INPUTS ====================
 nwSettings = "No Wick Candle Settings"
-show_compensation = input.bool(true, "Show Compensation Lines", group=nwSettings)
-show_compensation_label = input.bool(true, "Show Compensation Label", group=nwSettings)
-compensationBars = input.int(20, "Compensation Line Length (bars)", group=nwSettings, minval=1)
-colorNoWickCandles = input.bool(true, "Color No-Wick Candles", group=nwSettings)
-bullishNoWickColor = input.color(color.lime, "Bullish No-Wick Color", group=nwSettings)
-bearishNoWickColor = input.color(color.fuchsia, "Bearish No-Wick Color", group=nwSettings)
+show_compensation = input.bool(true, "Show Compensation Lines", group=nwSettings, display=display.data_window)
+show_compensation_label = input.bool(true, "Show Compensation Label", group=nwSettings, display=display.data_window)
+compensationBars = input.int(20, "Compensation Line Length (bars)", group=nwSettings, minval=1, display=display.data_window)
+colorNoWickCandles = input.bool(true, "Color No-Wick Candles", group=nwSettings, display=display.data_window)
+bullishNoWickColor = input.color(color.lime, "Bullish No-Wick Color", group=nwSettings, display=display.data_window)
+bearishNoWickColor = input.color(color.fuchsia, "Bearish No-Wick Color", group=nwSettings, display=display.data_window)
 
 // ==================== HTF MARKER INPUTS ====================
 htfSettings = "HTF Marker Settings"
-show_htf_marker = input.bool(true, "Show HTF Start Marker", group=htfSettings)
-show_30m_marker = input.bool(true, "Mark 30min Candle Start", group=htfSettings)
-color_30m = input.color(color.yellow, "30min Marker Color", group=htfSettings)
-show_1h_marker = input.bool(true, "Mark 1h Candle Start", group=htfSettings)
-color_1h = input.color(color.orange, "1h Marker Color", group=htfSettings)
-show_4h_marker = input.bool(true, "Mark 4h Candle Start", group=htfSettings)
-color_4h = input.color(color.aqua, "4h Marker Color", group=htfSettings)
+show_htf_marker = input.bool(true, "Show HTF Start Marker", group=htfSettings, display=display.data_window)
+show_30m_marker = input.bool(true, "Mark 30min Candle Start", group=htfSettings, display=display.data_window)
+color_30m = input.color(color.yellow, "30min Marker Color", group=htfSettings, display=display.data_window)
+show_1h_marker = input.bool(true, "Mark 1h Candle Start", group=htfSettings, display=display.data_window)
+color_1h = input.color(color.orange, "1h Marker Color", group=htfSettings, display=display.data_window)
+show_4h_marker = input.bool(true, "Mark 4h Candle Start", group=htfSettings, display=display.data_window)
+color_4h = input.color(color.aqua, "4h Marker Color", group=htfSettings, display=display.data_window)
 
 // ==================== TRADE INPUTS ====================
 tradeSettings = "Trade Settings"
-contracts = input.int(1, "Number of Contracts", minval=1, group=tradeSettings)
-cancelAfter = input.int(10, "Cancel Order After X Candles", minval=1, group=tradeSettings)
-atrMultiplier = input.float(1.5, "ATR Multiplier for SL", minval=0.1, step=0.1, group=tradeSettings)
-tpMultiplier = input.float(2.0, "TP (x SL)", minval=0.1, step=0.1, group=tradeSettings)
+contracts = input.int(1, "Number of Contracts", minval=1, group=tradeSettings, display=display.data_window)
+cancelAfter = input.int(10, "Cancel Order After X Candles", minval=1, group=tradeSettings, display=display.data_window)
+atrMultiplier = input.float(1.5, "ATR Multiplier for SL", minval=0.1, step=0.1, group=tradeSettings, display=display.data_window)
+tpMultiplier = input.float(2.0, "TP (x SL)", minval=0.1, step=0.1, group=tradeSettings, display=display.data_window)
+showHistoricalTrades = input.bool(true, "Show Historical Entry/SL/TP Lines", group=tradeSettings, display=display.data_window)
 
 // ==================== SESSION INPUTS ====================
 sessionSettings = "Session Settings"
-useSession = input.bool(false, "Use Session Filter", group=sessionSettings)
-tradingSession = input.session("0200-1600", "Trading Session", group=sessionSettings)
-sessionTimezone = input.string("America/New_York", "Session Timezone", options=["America/New_York", "America/Chicago", "America/Los_Angeles", "America/Toronto", "Europe/London", "Europe/Berlin", "Europe/Paris", "Europe/Zurich", "Europe/Moscow", "Asia/Tokyo", "Asia/Hong_Kong", "Asia/Shanghai", "Asia/Singapore", "Asia/Dubai", "Asia/Kolkata", "Australia/Sydney", "Pacific/Auckland", "UTC"], group=sessionSettings)
+useSession = input.bool(false, "Use Session Filter", group=sessionSettings, display=display.data_window)
+tradingSession = input.session("0200-1600", "Trading Session", group=sessionSettings, display=display.data_window)
+sessionTimezone = input.string("America/New_York", "Session Timezone", options=["America/New_York", "America/Chicago", "America/Los_Angeles", "America/Toronto", "Europe/London", "Europe/Berlin", "Europe/Paris", "Europe/Zurich", "Europe/Moscow", "Asia/Tokyo", "Asia/Hong_Kong", "Asia/Shanghai", "Asia/Singapore", "Asia/Dubai", "Asia/Kolkata", "Australia/Sydney", "Pacific/Auckland", "UTC"], group=sessionSettings, display=display.data_window)
 
 // ==================== VISUAL INPUTS ====================
 visualSettings = "Visual Settings"
-showZones = input.bool(true, "Show Entry/SL Zones", group=visualSettings)
-zoneTransparency = input.int(80, "Zone Transparency", minval=0, maxval=100, group=visualSettings)
+showZones = input.bool(true, "Show Entry/SL Zones", group=visualSettings, display=display.data_window)
+zoneTransparency = input.int(80, "Zone Transparency", minval=0, maxval=100, group=visualSettings, display=display.data_window)
+showInfoTable = input.bool(true, "Show Info Table", group=visualSettings, display=display.data_window)
 
 // ==================== EMA CALCULATION ====================
 ema = ta.ema(close, emaLength)
@@ -221,10 +223,8 @@ is30mStart = ta.change(time("30")) != 0
 is1hStart = ta.change(time("60")) != 0
 is4hStart = ta.change(time("240")) != 0
 
-// Determine highest priority HTF
 htfPriority = is4hStart and show_4h_marker ? 3 : is1hStart and show_1h_marker ? 2 : is30mStart and show_30m_marker ? 1 : 0
 
-// No-Wick at HTF start
 bullishNoWick30m = bullishNoBottomWick and is30mStart and show_30m_marker and htfPriority == 1
 bearishNoWick30m = bearishNoTopWick and is30mStart and show_30m_marker and htfPriority == 1
 
@@ -255,12 +255,14 @@ var float longStopLoss = na
 var float longTakeProfit = na
 var int longOrderBars = 0
 var bool longPending = false
+var int longEntryBar = na
 
 var float shortEntryPrice = na
 var float shortStopLoss = na
 var float shortTakeProfit = na
 var int shortOrderBars = 0
 var bool shortPending = false
+var int shortEntryBar = na
 
 var float signalAtr = na
 var box entryBox = na
@@ -268,6 +270,7 @@ var box slBox = na
 
 var float activeSL = na
 var float activeTP = na
+var float activeEntry = na
 var bool inLong = false
 var bool inShort = false
 
@@ -309,6 +312,7 @@ if bullishNoBottomWick and canGoLong
     longTakeProfit := longEntryPrice + (signalAtr * atrMultiplier * tpMultiplier)
     longOrderBars := 0
     longPending := true
+    longEntryBar := bar_index
     
     if showZones
         entryBox := box.new(bar_index, close, bar_index + cancelAfter, longEntryPrice, border_color=color.green, bgcolor=color.new(color.green, zoneTransparency), border_width=1)
@@ -331,6 +335,7 @@ if bearishNoTopWick and canGoShort
     shortTakeProfit := shortEntryPrice - (signalAtr * atrMultiplier * tpMultiplier)
     shortOrderBars := 0
     shortPending := true
+    shortEntryBar := bar_index
     
     if showZones
         entryBox := box.new(bar_index, shortEntryPrice, bar_index + cancelAfter, close, border_color=color.green, bgcolor=color.new(color.green, zoneTransparency), border_width=1)
@@ -343,9 +348,17 @@ if strategy.position_size > 0 and not inLong
     inLong := true
     inShort := false
     longPending := false
-    activeSL := strategy.position_avg_price - (signalAtr * atrMultiplier)
-    activeTP := strategy.position_avg_price + (signalAtr * atrMultiplier * tpMultiplier)
+    activeEntry := strategy.position_avg_price
+    activeSL := activeEntry - (signalAtr * atrMultiplier)
+    activeTP := activeEntry + (signalAtr * atrMultiplier * tpMultiplier)
     strategy.exit("Long Exit", "Long", stop=activeSL, limit=activeTP)
+    
+    // Draw historical trade lines
+    if showHistoricalTrades
+        line.new(bar_index, activeEntry, bar_index + 50, activeEntry, color=color.blue, width=1, style=line.style_solid)
+        line.new(bar_index, activeSL, bar_index + 50, activeSL, color=color.red, width=1, style=line.style_dotted)
+        line.new(bar_index, activeTP, bar_index + 50, activeTP, color=color.green, width=1, style=line.style_dotted)
+    
     if not na(entryBox)
         box.delete(entryBox)
         entryBox := na
@@ -357,9 +370,17 @@ if strategy.position_size < 0 and not inShort
     inShort := true
     inLong := false
     shortPending := false
-    activeSL := strategy.position_avg_price + (signalAtr * atrMultiplier)
-    activeTP := strategy.position_avg_price - (signalAtr * atrMultiplier * tpMultiplier)
+    activeEntry := strategy.position_avg_price
+    activeSL := activeEntry + (signalAtr * atrMultiplier)
+    activeTP := activeEntry - (signalAtr * atrMultiplier * tpMultiplier)
     strategy.exit("Short Exit", "Short", stop=activeSL, limit=activeTP)
+    
+    // Draw historical trade lines
+    if showHistoricalTrades
+        line.new(bar_index, activeEntry, bar_index + 50, activeEntry, color=color.blue, width=1, style=line.style_solid)
+        line.new(bar_index, activeSL, bar_index + 50, activeSL, color=color.red, width=1, style=line.style_dotted)
+        line.new(bar_index, activeTP, bar_index + 50, activeTP, color=color.green, width=1, style=line.style_dotted)
+    
     if not na(entryBox)
         box.delete(entryBox)
         entryBox := na
@@ -370,6 +391,7 @@ if strategy.position_size < 0 and not inShort
 if strategy.position_size == 0 and (inLong or inShort)
     activeSL := na
     activeTP := na
+    activeEntry := na
     inLong := false
     inShort := false
     longEntryPrice := na
@@ -410,23 +432,21 @@ bgcolor(bgColor)
 bgcolor(useSession and isInSession ? color.new(color.blue, 95) : na, title="Session")
 
 plot(trendMethod == "EMA" ? ema : na, "EMA", color=color.orange, linewidth=2)
-plot(inLong or inShort ? activeSL : na, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2)
-plot(inLong or inShort ? activeTP : na, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
-plot(inLong or inShort ? strategy.position_avg_price : na, "Entry", color=color.blue, style=plot.style_linebr, linewidth=1)
+
+// Current active trade lines (extending)
+plot(inLong or inShort ? activeSL : na, "Current SL", color=color.red, style=plot.style_linebr, linewidth=2)
+plot(inLong or inShort ? activeTP : na, "Current TP", color=color.green, style=plot.style_linebr, linewidth=2)
+plot(inLong or inShort ? activeEntry : na, "Current Entry", color=color.blue, style=plot.style_linebr, linewidth=1)
 
 // No-Wick Signals
 plotshape(bullishNoBottomWick, "Bullish No Wick", shape.triangleup, location.belowbar, color.green, size=size.small)
 plotshape(bearishNoTopWick, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
 
-// HTF Start Markers - 30min (Yellow Diamond)
+// HTF Start Markers
 plotshape(bullishNoWick30m and show_htf_marker, "Bullish 30m", shape.diamond, location.belowbar, color_30m, size=size.tiny)
 plotshape(bearishNoWick30m and show_htf_marker, "Bearish 30m", shape.diamond, location.abovebar, color_30m, size=size.tiny)
-
-// HTF Start Markers - 1h (Orange Diamond)
 plotshape(bullishNoWick1h and show_htf_marker, "Bullish 1h", shape.diamond, location.belowbar, color_1h, size=size.tiny)
 plotshape(bearishNoWick1h and show_htf_marker, "Bearish 1h", shape.diamond, location.abovebar, color_1h, size=size.tiny)
-
-// HTF Start Markers - 4h (Aqua Cross) - Higher priority, always shown
 plotshape(bullishNoWick4h and show_htf_marker, "Bullish 4h", shape.xcross, location.belowbar, color_4h, size=size.small)
 plotshape(bearishNoWick4h and show_htf_marker, "Bearish 4h", shape.xcross, location.abovebar, color_4h, size=size.small)
 
@@ -436,8 +456,8 @@ plotshape(isBearishNoWick and canGoShort, "Valid Short", shape.circle, location.
 
 // ==================== INFO TABLE ====================
 var table infoTable = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80))
-if barstate.islast
-    htfText = is4hStart ? "4H ★" : is1hStart ? "1H ◆" : is30mStart ? "30M ◆" : "-"
+if barstate.islast and showInfoTable
+    htfText = is4hStart ? "4H ✖" : is1hStart ? "1H ◆" : is30mStart ? "30M ◆" : "-"
     htfColor = is4hStart ? color_4h : is1hStart ? color_1h : is30mStart ? color_30m : color.gray
     
     table.cell(infoTable, 0, 0, "Structure", text_color=color.white)
