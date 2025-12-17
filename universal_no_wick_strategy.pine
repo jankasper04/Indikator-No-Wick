@@ -426,9 +426,9 @@ plotshape(bearishNoWick30m and show_htf_marker, "Bearish 30m", shape.diamond, lo
 plotshape(bullishNoWick1h and show_htf_marker, "Bullish 1h", shape.diamond, location.belowbar, color_1h, size=size.tiny)
 plotshape(bearishNoWick1h and show_htf_marker, "Bearish 1h", shape.diamond, location.abovebar, color_1h, size=size.tiny)
 
-// HTF Start Markers - 4h (Aqua Star) - Higher priority, always shown
-plotshape(bullishNoWick4h and show_htf_marker, "Bullish 4h", shape.star, location.belowbar, color_4h, size=size.small)
-plotshape(bearishNoWick4h and show_htf_marker, "Bearish 4h", shape.star, location.abovebar, color_4h, size=size.small)
+// HTF Start Markers - 4h (Aqua Cross) - Higher priority, always shown
+plotshape(bullishNoWick4h and show_htf_marker, "Bullish 4h", shape.xcross, location.belowbar, color_4h, size=size.small)
+plotshape(bearishNoWick4h and show_htf_marker, "Bearish 4h", shape.xcross, location.abovebar, color_4h, size=size.small)
 
 // Valid signals
 plotshape(isBullishNoWick and canGoLong, "Valid Long", shape.circle, location.belowbar, color.lime, size=size.tiny)
