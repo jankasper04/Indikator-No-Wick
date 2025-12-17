@@ -1,14 +1,20 @@
 //@version=5
 strategy("Universal No Wick Market Structure Strategy", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
 
-// ==================== TREND FILTER METHOD ====================
-filterSettings = "Trend Filter Settings"
-trendMethod = input.string("Market Structure", "Trend Filter Method", options=["Market Structure", "EMA"], group=filterSettings, display=display.data_window)
-emaLength = input.int(50, "EMA Length", group=filterSettings, minval=5, display=display.data_window)
+// ==================== MAIN SETTINGS (Ordered by User Request) ====================
+mainSettings = "Main Settings"
+trendMethod = input.string("Market Structure", "Trend Filter Method", options=["Market Structure", "EMA"], group=mainSettings)
+emaLength = input.int(50, "EMA Length", group=mainSettings, minval=5)
+zigzag_len = input.int(9, "ZigZag Length", group=mainSettings, minval=3)
+atrMultiplier = input.float(1.5, "ATR Multiplier for SL", minval=0.1, step=0.1, group=mainSettings, tooltip="Used when SL Method = ATR")
+tpMultiplier = input.float(2.0, "TP (x SL)", minval=0.1, step=0.1, group=mainSettings)
+slMethod = input.string("ATR", "Stop Loss Method", options=["ATR", "Structure (Last High/Low)"], group=mainSettings)
+structureBuffer = input.float(0.5, "Structure Buffer (ATR)", minval=0.0, step=0.1, group=mainSettings, tooltip="Buffer added to structure level (in ATR units). Used when SL Method = Structure")
+contracts = input.int(1, "Number of Contracts", minval=1, group=mainSettings)
+cancelAfter = input.int(10, "Cancel Order After X Candles", minval=1, group=mainSettings)
 
-// ==================== MARKET STRUCTURE INPUTS ====================
-msSettings = "Market Structure Settings"
-zigzag_len = input.int(9, "ZigZag Length", group=msSettings, minval=3, display=display.data_window)
+// ==================== MARKET STRUCTURE VISUALS ====================
+msSettings = "Market Structure Visuals"
 show_zigzag = input.bool(true, "Show ZigZag", group=msSettings, display=display.data_window)
 show_hh_ll = input.bool(true, "Show HH/HL/LH/LL Labels", group=msSettings, display=display.data_window)
 show_choch = input.bool(true, "Show Change of Character (ChoCH)", group=msSettings, display=display.data_window)
@@ -33,16 +39,6 @@ color_1h = input.color(color.orange, "1h Marker Color", group=htfSettings, displ
 show_4h_marker = input.bool(true, "Mark 4h Candle Start", group=htfSettings, display=display.data_window)
 color_4h = input.color(color.aqua, "4h Marker Color", group=htfSettings, display=display.data_window)
 
-// ==================== TRADE INPUTS ====================
-tradeSettings = "Trade Settings"
-contracts = input.int(1, "Number of Contracts", minval=1, group=tradeSettings, display=display.data_window)
-cancelAfter = input.int(10, "Cancel Order After X Candles", minval=1, group=tradeSettings, display=display.data_window)
-slMethod = input.string("ATR", "Stop Loss Method", options=["ATR", "Structure (Last High/Low)"], group=tradeSettings, display=display.data_window)
-atrMultiplier = input.float(1.5, "ATR Multiplier for SL", minval=0.1, step=0.1, group=tradeSettings, display=display.data_window, tooltip="Used when SL Method = ATR")
-structureBuffer = input.float(0.5, "Structure Buffer (ATR)", minval=0.0, step=0.1, group=tradeSettings, display=display.data_window, tooltip="Buffer in ATR units added to structure level. Used when SL Method = Structure")
-tpMultiplier = input.float(2.0, "TP (x SL Distance)", minval=0.1, step=0.1, group=tradeSettings, display=display.data_window)
-showHistoricalTrades = input.bool(true, "Show Historical Entry/SL/TP Lines", group=tradeSettings, display=display.data_window)
-
 // ==================== SESSION INPUTS ====================
 sessionSettings = "Session Settings"
 useSession = input.bool(false, "Use Session Filter", group=sessionSettings, display=display.data_window)
@@ -54,6 +50,7 @@ visualSettings = "Visual Settings"
 showZones = input.bool(true, "Show Entry/SL Zones", group=visualSettings, display=display.data_window)
 zoneTransparency = input.int(80, "Zone Transparency", minval=0, maxval=100, group=visualSettings, display=display.data_window)
 showInfoTable = input.bool(true, "Show Info Table", group=visualSettings, display=display.data_window)
+showHistoricalTrades = input.bool(true, "Show Historical Entry/SL/TP Lines", group=visualSettings, display=display.data_window)
 
 // ==================== STATISTICS DASHBOARD ====================
 statsSettings = "Statistics Dashboard"
@@ -436,11 +433,11 @@ if strategy.position_size > 0 and not inLong
     longPending := false
     activeEntry := strategy.position_avg_price
     
-    // Use pre-calculated SL or recalculate based on method
+    // Calculate SL based on selected method
     if slMethod == "ATR"
         activeSL := activeEntry - (signalAtr * atrMultiplier)
-    else
-        activeSL := longStopLoss  // Use structure-based SL
+    else // Structure
+        activeSL := longStopLoss  // Use pre-calculated structure-based SL
     
     slDist = activeEntry - activeSL
     activeTP := activeEntry + (slDist * tpMultiplier)
@@ -464,11 +461,11 @@ if strategy.position_size < 0 and not inShort
     shortPending := false
     activeEntry := strategy.position_avg_price
     
-    // Use pre-calculated SL or recalculate based on method
+    // Calculate SL based on selected method
     if slMethod == "ATR"
         activeSL := activeEntry + (signalAtr * atrMultiplier)
-    else
-        activeSL := shortStopLoss  // Use structure-based SL
+    else // Structure
+        activeSL := shortStopLoss  // Use pre-calculated structure-based SL
     
     slDist = activeSL - activeEntry
     activeTP := activeEntry - (slDist * tpMultiplier)
@@ -552,7 +549,7 @@ plotshape(isBullishNoWick and canGoLong, "Valid Long", shape.circle, location.be
 plotshape(isBearishNoWick and canGoShort, "Valid Short", shape.circle, location.abovebar, color.fuchsia, size=size.tiny)
 
 // ==================== INFO TABLE ====================
-var table infoTable = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 80))
+var table infoTable = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80))
 if barstate.islast and showInfoTable
     htfText = is4hStart ? "4H ✖" : is1hStart ? "1H ◆" : is30mStart ? "30M ◆" : "-"
     htfColor = is4hStart ? color_4h : is1hStart ? color_1h : is30mStart ? color_30m : color.gray
@@ -561,22 +558,20 @@ if barstate.islast and showInfoTable
     table.cell(infoTable, 1, 0, marketStructure == 1 ? "BULLISH ↑" : marketStructure == -1 ? "BEARISH ↓" : "NEUTRAL", text_color=marketStructure == 1 ? color.green : marketStructure == -1 ? color.red : color.gray)
     table.cell(infoTable, 0, 1, "Trade", text_color=color.white)
     table.cell(infoTable, 1, 1, marketStructure == 1 ? "LONG ONLY" : marketStructure == -1 ? "SHORT ONLY" : "NONE", text_color=marketStructure == 1 ? color.green : marketStructure == -1 ? color.red : color.gray)
-    table.cell(infoTable, 0, 2, "SL Method", text_color=color.white)
-    table.cell(infoTable, 1, 2, slMethod, text_color=color.orange)
-    table.cell(infoTable, 0, 3, "HTF Start", text_color=color.white)
-    table.cell(infoTable, 1, 3, htfText, text_color=htfColor)
-    table.cell(infoTable, 0, 4, "Last High", text_color=color.white)
-    table.cell(infoTable, 1, 4, (isHigherHigh ? "HH " : "LH ") + str.tostring(h0, "#.##"), text_color=isHigherHigh ? color.green : color.red)
-    table.cell(infoTable, 0, 5, "Last Low", text_color=color.white)
-    table.cell(infoTable, 1, 5, (isHigherLow ? "HL " : "LL ") + str.tostring(l0, "#.##"), text_color=isHigherLow ? color.green : color.red)
-    table.cell(infoTable, 0, 6, "Position", text_color=color.white)
-    table.cell(infoTable, 1, 6, inLong ? "LONG" : inShort ? "SHORT" : "FLAT", text_color=inLong ? color.green : inShort ? color.red : color.gray)
-    table.cell(infoTable, 0, 7, "Pending", text_color=color.white)
-    table.cell(infoTable, 1, 7, longPending ? "LONG" : shortPending ? "SHORT" : "-", text_color=longPending ? color.green : shortPending ? color.red : color.gray)
-    table.cell(infoTable, 0, 8, "SL", text_color=color.white)
-    table.cell(infoTable, 1, 8, not na(activeSL) ? str.tostring(activeSL, "#.##") : "-", text_color=color.red)
-    table.cell(infoTable, 0, 9, "TP", text_color=color.white)
-    table.cell(infoTable, 1, 9, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
+    table.cell(infoTable, 0, 2, "HTF Start", text_color=color.white)
+    table.cell(infoTable, 1, 2, htfText, text_color=htfColor)
+    table.cell(infoTable, 0, 3, "Last High", text_color=color.white)
+    table.cell(infoTable, 1, 3, (isHigherHigh ? "HH " : "LH ") + str.tostring(h0, "#.##"), text_color=isHigherHigh ? color.green : color.red)
+    table.cell(infoTable, 0, 4, "Last Low", text_color=color.white)
+    table.cell(infoTable, 1, 4, (isHigherLow ? "HL " : "LL ") + str.tostring(l0, "#.##"), text_color=isHigherLow ? color.green : color.red)
+    table.cell(infoTable, 0, 5, "Position", text_color=color.white)
+    table.cell(infoTable, 1, 5, inLong ? "LONG" : inShort ? "SHORT" : "FLAT", text_color=inLong ? color.green : inShort ? color.red : color.gray)
+    table.cell(infoTable, 0, 6, "Pending", text_color=color.white)
+    table.cell(infoTable, 1, 6, longPending ? "LONG" : shortPending ? "SHORT" : "-", text_color=longPending ? color.green : shortPending ? color.red : color.gray)
+    table.cell(infoTable, 0, 7, "SL", text_color=color.white)
+    table.cell(infoTable, 1, 7, not na(activeSL) ? str.tostring(activeSL, "#.##") : "-", text_color=color.red)
+    table.cell(infoTable, 0, 8, "TP", text_color=color.white)
+    table.cell(infoTable, 1, 8, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
 
 // ==================== STATISTICS DASHBOARD ====================
 // Create tables for each position (only one will be populated)
