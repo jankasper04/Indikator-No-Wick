@@ -242,25 +242,25 @@ f_noWickStats(tf) =>
 
 // Count no-wick candles over lookback period
 // Current timeframe
-countBullCurrent = math.sum(bullishNoBottomWick ? 1 : 0, statsLookback)
-countBearCurrent = math.sum(bearishNoTopWick ? 1 : 0, statsLookback)
-countTotalCurrent = countBullCurrent + countBearCurrent
+float countBullCurrent = math.sum(bullishNoBottomWick ? 1 : 0, statsLookback)
+float countBearCurrent = math.sum(bearishNoTopWick ? 1 : 0, statsLookback)
+float countTotalCurrent = countBullCurrent + countBearCurrent
 
 // M15
-countBull15 = math.sum(bull15 ? 1 : 0, statsLookback)
-countBear15 = math.sum(bear15 ? 1 : 0, statsLookback)
+float countBull15 = math.sum(bull15 ? 1 : 0, statsLookback)
+float countBear15 = math.sum(bear15 ? 1 : 0, statsLookback)
 
 // M30
-countBull30 = math.sum(bull30 ? 1 : 0, statsLookback)
-countBear30 = math.sum(bear30 ? 1 : 0, statsLookback)
+float countBull30 = math.sum(bull30 ? 1 : 0, statsLookback)
+float countBear30 = math.sum(bear30 ? 1 : 0, statsLookback)
 
 // H1
-countBull60 = math.sum(bull60 ? 1 : 0, statsLookback)
-countBear60 = math.sum(bear60 ? 1 : 0, statsLookback)
+float countBull60 = math.sum(bull60 ? 1 : 0, statsLookback)
+float countBear60 = math.sum(bear60 ? 1 : 0, statsLookback)
 
 // H4
-countBull240 = math.sum(bull240 ? 1 : 0, statsLookback)
-countBear240 = math.sum(bear240 ? 1 : 0, statsLookback)
+float countBull240 = math.sum(bull240 ? 1 : 0, statsLookback)
+float countBear240 = math.sum(bear240 ? 1 : 0, statsLookback)
 
 // Calculate percentages
 float pctCurrent = statsLookback > 0 ? (countTotalCurrent / statsLookback) * 100 : 0
