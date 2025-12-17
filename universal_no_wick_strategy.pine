@@ -1,86 +1,198 @@
 //@version=5
-strategy("Universal 15min No Wick Strategy V1", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
+strategy("Universal No Wick Pullback Strategy", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
 
-// Input settings
-wickThreshold = input.float(0.6, "Wick Size Threshold (%)", minval=0, maxval=100, step=0.1) / 100
-tradingSession = input.session("0200-1600", "Trading Session (NY Time)")
+// ==================== INPUTS ====================
+// Trend Settings
+emaLength = input.int(50, "EMA Length for Trend", minval=5)
+useEmaFilter = input.bool(true, "Use EMA Trend Filter")
+
+// No Wick Candle Settings
+wickThreshold = input.float(10, "Max Wick Size (% of candle)", minval=0, maxval=50, step=1) / 100
+minBodyAtr = input.float(0.3, "Min Body Size (x ATR)", minval=0.1, step=0.1)
+maxBodyAtr = input.float(3.0, "Max Body Size (x ATR)", minval=0.5, step=0.1)
+
+// Entry Settings
 contracts = input.int(1, "Number of Contracts", minval=1)
-limitDistance = input.float(2, "Limit Order Distance (points)", minval=1)
-atrMultiplier = input.float(2, "ATR Multiplier for SL", minval=0.1, step=0.1)
-tpMultiplier = input.float(0.8, "TP (SL multiplier)", minval=0.1, step=0.1)
-cancelAfter = input.int(5, "Cancel Order After X Candles", minval=1)
-minBodySize = input.float(10, "Minimum Body Size (points)", minval=0, step=1)
-maxBodySize = input.float(50, "Maximum Body Size (points)", minval=0, step=1)
+cancelAfter = input.int(10, "Cancel Order After X Candles", minval=1)
 
-// Calculate ATR
+// Exit Settings
+atrMultiplier = input.float(1.5, "ATR Multiplier for SL", minval=0.1, step=0.1)
+tpMultiplier = input.float(2.0, "TP (x SL)", minval=0.1, step=0.1)
+
+// Session Filter
+useSession = input.bool(false, "Use Session Filter")
+tradingSession = input.session("0200-1600", "Trading Session (NY Time)")
+
+// ==================== CALCULATIONS ====================
+// ATR for dynamic sizing
 atr = ta.atr(14)
+
+// EMA for trend
+ema = ta.ema(close, emaLength)
+
+// Trend direction
+isUptrend = close > ema
+isDowntrend = close < ema
 
 // Calculate candle properties
 bodySize = math.abs(close - open)
 totalSize = high - low
 
+// Avoid division by zero
+safeTotal = totalSize > 0 ? totalSize : 1
+
 // Calculate wick sizes
 upperWick = high - math.max(open, close)
 lowerWick = math.min(open, close) - low
 
-// Calculate wick percentages
-upperWickPercent = upperWick / totalSize
-lowerWickPercent = lowerWick / totalSize
+// Calculate wick percentages relative to total candle size
+upperWickPercent = upperWick / safeTotal
+lowerWickPercent = lowerWick / safeTotal
 
-// Detect no-wick conditions with body size filters
-isBullishNoWick = close > open and lowerWickPercent <= wickThreshold and bodySize >= minBodySize and bodySize <= maxBodySize
-isBearishNoWick = close < open and upperWickPercent <= wickThreshold and bodySize >= minBodySize and bodySize <= maxBodySize
+// Body size relative to ATR
+bodyAtrRatio = bodySize / atr
 
-// Check if within trading session
-isInSession = not na(time(timeframe.period, tradingSession))
+// ==================== NO WICK CANDLE DETECTION ====================
+// Bullish No Wick: Green candle with small/no lower wick (in uptrend)
+isBullishCandle = close > open
+hasSmallLowerWick = lowerWickPercent <= wickThreshold
+validBullishBody = bodyAtrRatio >= minBodyAtr and bodyAtrRatio <= maxBodyAtr
+trendOkBullish = useEmaFilter ? isUptrend : true
 
-// Strategy logic
+isBullishNoWick = isBullishCandle and hasSmallLowerWick and validBullishBody and trendOkBullish
+
+// Bearish No Wick: Red candle with small/no upper wick (in downtrend)
+isBearishCandle = close < open
+hasSmallUpperWick = upperWickPercent <= wickThreshold
+validBearishBody = bodyAtrRatio >= minBodyAtr and bodyAtrRatio <= maxBodyAtr
+trendOkBearish = useEmaFilter ? isDowntrend : true
+
+isBearishNoWick = isBearishCandle and hasSmallUpperWick and validBearishBody and trendOkBearish
+
+// Session filter
+isInSession = useSession ? not na(time(timeframe.period, tradingSession)) : true
+
+// ==================== STRATEGY LOGIC ====================
 var float longEntryPrice = na
-var float shortEntryPrice = na
+var float longStopLoss = na
+var float longTakeProfit = na
 var int longOrderBars = 0
+var bool longPending = false
+
+var float shortEntryPrice = na
+var float shortStopLoss = na
+var float shortTakeProfit = na
 var int shortOrderBars = 0
+var bool shortPending = false
 
-// Long setup
-if isBullishNoWick and isInSession and strategy.position_size == 0
-    longEntryPrice := open - limitDistance
+// Store ATR at signal for consistent SL/TP
+var float signalAtr = na
+
+// ==================== LONG SETUP ====================
+// When bullish no-wick candle appears, set limit order at the OPEN of that candle (pullback level)
+if isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending
+    longEntryPrice := open  // Entry at the open of the no-wick candle (pullback)
+    signalAtr := atr
+    longStopLoss := longEntryPrice - (signalAtr * atrMultiplier)
+    longTakeProfit := longEntryPrice + (signalAtr * atrMultiplier * tpMultiplier)
     longOrderBars := 0
+    longPending := true
     strategy.entry("Long", strategy.long, limit=longEntryPrice, qty=contracts)
-    strategy.exit("TP/SL", "Long", stop=longEntryPrice - atr * atrMultiplier, limit=longEntryPrice + (atr * atrMultiplier * tpMultiplier))
+    strategy.exit("Long Exit", "Long", stop=longStopLoss, limit=longTakeProfit)
 
-// Short setup
-if isBearishNoWick and isInSession and strategy.position_size == 0
-    shortEntryPrice := close + limitDistance
+// ==================== SHORT SETUP ====================
+// When bearish no-wick candle appears, set limit order at the OPEN of that candle (pullback level)
+if isBearishNoWick and isInSession and strategy.position_size == 0 and not shortPending
+    shortEntryPrice := open  // Entry at the open of the no-wick candle (pullback)
+    signalAtr := atr
+    shortStopLoss := shortEntryPrice + (signalAtr * atrMultiplier)
+    shortTakeProfit := shortEntryPrice - (signalAtr * atrMultiplier * tpMultiplier)
     shortOrderBars := 0
+    shortPending := true
     strategy.entry("Short", strategy.short, limit=shortEntryPrice, qty=contracts)
-    strategy.exit("TP/SL", "Short", stop=shortEntryPrice + atr * atrMultiplier, limit=shortEntryPrice - (atr * atrMultiplier * tpMultiplier))
+    strategy.exit("Short Exit", "Short", stop=shortStopLoss, limit=shortTakeProfit)
 
-// Cancel orders if not executed
-if not na(longEntryPrice)
+// ==================== ORDER MANAGEMENT ====================
+// Cancel long orders after X candles if not filled
+if longPending
     longOrderBars := longOrderBars + 1
     if longOrderBars >= cancelAfter
         strategy.cancel("Long")
         longEntryPrice := na
+        longStopLoss := na
+        longTakeProfit := na
         longOrderBars := 0
+        longPending := false
 
-if not na(shortEntryPrice)
+// Cancel short orders after X candles if not filled
+if shortPending
     shortOrderBars := shortOrderBars + 1
     if shortOrderBars >= cancelAfter
         strategy.cancel("Short")
         shortEntryPrice := na
+        shortStopLoss := na
+        shortTakeProfit := na
         shortOrderBars := 0
+        shortPending := false
 
-// Plot signals for visualization
-plotshape(isBullishNoWick and isInSession, "Bullish No Wick", shape.triangleup, location.belowbar, color.green, size=size.small)
+// Reset when position is opened
+if strategy.position_size > 0 and longPending
+    longPending := false
+    
+if strategy.position_size < 0 and shortPending
+    shortPending := false
+
+// Reset when position is closed
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    longEntryPrice := na
+    longStopLoss := na
+    longTakeProfit := na
+    shortEntryPrice := na
+    shortStopLoss := na
+    shortTakeProfit := na
+
+// ==================== VISUALIZATION ====================
+// Plot EMA
+plot(ema, "EMA", color=color.orange, linewidth=2)
+
+// Plot signals for no-wick candles
+plotshape(isBullishNoWick and isInSession, "Bullish No Wick", shape.triangleup, location.belowbar, color.lime, size=size.small)
 plotshape(isBearishNoWick and isInSession, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
 
+// Plot entry levels when pending
+entryLevel = longPending ? longEntryPrice : shortPending ? shortEntryPrice : na
+slLevel = longPending ? longStopLoss : shortPending ? shortStopLoss : na
+tpLevel = longPending ? longTakeProfit : shortPending ? shortTakeProfit : na
 
-// Calculate current SL and TP levels
-currentSL = not na(longEntryPrice) ? longEntryPrice - atr * atrMultiplier : 
-           not na(shortEntryPrice) ? shortEntryPrice + atr * atrMultiplier : na
+plot(entryLevel, "Entry Level", color=color.yellow, style=plot.style_linebr, linewidth=2)
+plot(slLevel, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=1)
+plot(tpLevel, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=1)
 
-currentTP = not na(longEntryPrice) ? longEntryPrice + (atr * atrMultiplier * tpMultiplier) : 
-           not na(shortEntryPrice) ? shortEntryPrice - (atr * atrMultiplier * tpMultiplier) : na
+// ==================== DEBUG INFO ====================
+// Table to show current conditions
+var table debugTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80))
 
-// Plot single SL and TP lines
-plot(currentSL, "Stop Loss", color=color.red, style=plot.style_line)
-plot(currentTP, "Take Profit", color=color.green, style=plot.style_line)
+if barstate.islast
+    table.cell(debugTable, 0, 0, "Condition", text_color=color.white)
+    table.cell(debugTable, 1, 0, "Value", text_color=color.white)
+    
+    table.cell(debugTable, 0, 1, "Trend", text_color=color.white)
+    table.cell(debugTable, 1, 1, isUptrend ? "UP" : "DOWN", text_color=isUptrend ? color.green : color.red)
+    
+    table.cell(debugTable, 0, 2, "Body/ATR", text_color=color.white)
+    table.cell(debugTable, 1, 2, str.tostring(bodyAtrRatio, "#.##"), text_color=color.white)
+    
+    table.cell(debugTable, 0, 3, "Lower Wick %", text_color=color.white)
+    table.cell(debugTable, 1, 3, str.tostring(lowerWickPercent * 100, "#.#") + "%", text_color=color.white)
+    
+    table.cell(debugTable, 0, 4, "Upper Wick %", text_color=color.white)
+    table.cell(debugTable, 1, 4, str.tostring(upperWickPercent * 100, "#.#") + "%", text_color=color.white)
+    
+    table.cell(debugTable, 0, 5, "ATR", text_color=color.white)
+    table.cell(debugTable, 1, 5, str.tostring(atr, "#.##"), text_color=color.white)
+    
+    table.cell(debugTable, 0, 6, "Long Pending", text_color=color.white)
+    table.cell(debugTable, 1, 6, longPending ? "YES" : "NO", text_color=longPending ? color.green : color.gray)
+    
+    table.cell(debugTable, 0, 7, "Short Pending", text_color=color.white)
+    table.cell(debugTable, 1, 7, shortPending ? "YES" : "NO", text_color=shortPending ? color.red : color.gray)
