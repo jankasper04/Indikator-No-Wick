@@ -23,6 +23,10 @@ tpMultiplier = input.float(2.0, "TP (x SL)", minval=0.1, step=0.1)
 useSession = input.bool(false, "Use Session Filter")
 tradingSession = input.session("0200-1600", "Trading Session (NY Time)")
 
+// Visual Settings
+showZones = input.bool(true, "Show Entry/SL Zones")
+zoneTransparency = input.int(80, "Zone Transparency", minval=0, maxval=100)
+
 // ==================== CALCULATIONS ====================
 // ATR for dynamic sizing
 atr = ta.atr(14)
@@ -72,7 +76,7 @@ isBearishNoWick = isBearishCandle and hasSmallUpperWick and validBearishBody and
 // Session filter
 isInSession = useSession ? not na(time(timeframe.period, tradingSession)) : true
 
-// ==================== STRATEGY LOGIC ====================
+// ==================== STRATEGY VARIABLES ====================
 var float longEntryPrice = na
 var float longStopLoss = na
 var float longTakeProfit = na
@@ -85,30 +89,65 @@ var float shortTakeProfit = na
 var int shortOrderBars = 0
 var bool shortPending = false
 
-// Store ATR at signal for consistent SL/TP
 var float signalAtr = na
 
+// Box variables
+var box entryBox = na
+var box slBox = na
+
 // ==================== LONG SETUP ====================
-// When bullish no-wick candle appears, set limit order at the OPEN of that candle (pullback level)
-if isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending
-    longEntryPrice := open  // Entry at the open of the no-wick candle (pullback)
+if isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending
+    // Delete old boxes
+    if not na(entryBox)
+        box.delete(entryBox)
+    if not na(slBox)
+        box.delete(slBox)
+    
+    longEntryPrice := open
     signalAtr := atr
     longStopLoss := longEntryPrice - (signalAtr * atrMultiplier)
     longTakeProfit := longEntryPrice + (signalAtr * atrMultiplier * tpMultiplier)
     longOrderBars := 0
     longPending := true
+    
+    // Create Entry Zone Box (green)
+    if showZones
+        entryBox := box.new(bar_index, close, bar_index + cancelAfter, longEntryPrice, 
+                           border_color=color.green, bgcolor=color.new(color.green, zoneTransparency),
+                           border_width=1)
+        // Create SL Zone Box (red) - below entry
+        slBox := box.new(bar_index, longEntryPrice, bar_index + cancelAfter, longStopLoss,
+                        border_color=color.red, bgcolor=color.new(color.red, zoneTransparency),
+                        border_width=1)
+    
     strategy.entry("Long", strategy.long, limit=longEntryPrice, qty=contracts)
     strategy.exit("Long Exit", "Long", stop=longStopLoss, limit=longTakeProfit)
 
 // ==================== SHORT SETUP ====================
-// When bearish no-wick candle appears, set limit order at the OPEN of that candle (pullback level)
-if isBearishNoWick and isInSession and strategy.position_size == 0 and not shortPending
-    shortEntryPrice := open  // Entry at the open of the no-wick candle (pullback)
+if isBearishNoWick and isInSession and strategy.position_size == 0 and not shortPending and not longPending
+    // Delete old boxes
+    if not na(entryBox)
+        box.delete(entryBox)
+    if not na(slBox)
+        box.delete(slBox)
+    
+    shortEntryPrice := open
     signalAtr := atr
     shortStopLoss := shortEntryPrice + (signalAtr * atrMultiplier)
     shortTakeProfit := shortEntryPrice - (signalAtr * atrMultiplier * tpMultiplier)
     shortOrderBars := 0
     shortPending := true
+    
+    // Create Entry Zone Box (green) - from open to close
+    if showZones
+        entryBox := box.new(bar_index, shortEntryPrice, bar_index + cancelAfter, close,
+                           border_color=color.green, bgcolor=color.new(color.green, zoneTransparency),
+                           border_width=1)
+        // Create SL Zone Box (red) - above entry
+        slBox := box.new(bar_index, shortStopLoss, bar_index + cancelAfter, shortEntryPrice,
+                        border_color=color.red, bgcolor=color.new(color.red, zoneTransparency),
+                        border_width=1)
+    
     strategy.entry("Short", strategy.short, limit=shortEntryPrice, qty=contracts)
     strategy.exit("Short Exit", "Short", stop=shortStopLoss, limit=shortTakeProfit)
 
@@ -123,6 +162,12 @@ if longPending
         longTakeProfit := na
         longOrderBars := 0
         longPending := false
+        if not na(entryBox)
+            box.delete(entryBox)
+            entryBox := na
+        if not na(slBox)
+            box.delete(slBox)
+            slBox := na
 
 // Cancel short orders after X candles if not filled
 if shortPending
@@ -134,6 +179,12 @@ if shortPending
         shortTakeProfit := na
         shortOrderBars := 0
         shortPending := false
+        if not na(entryBox)
+            box.delete(entryBox)
+            entryBox := na
+        if not na(slBox)
+            box.delete(slBox)
+            slBox := na
 
 // Reset when position is opened
 if strategy.position_size > 0 and longPending
@@ -150,49 +201,17 @@ if strategy.position_size == 0 and strategy.position_size[1] != 0
     shortEntryPrice := na
     shortStopLoss := na
     shortTakeProfit := na
+    if not na(entryBox)
+        box.delete(entryBox)
+        entryBox := na
+    if not na(slBox)
+        box.delete(slBox)
+        slBox := na
 
 // ==================== VISUALIZATION ====================
 // Plot EMA
 plot(ema, "EMA", color=color.orange, linewidth=2)
 
 // Plot signals for no-wick candles
-plotshape(isBullishNoWick and isInSession, "Bullish No Wick", shape.triangleup, location.belowbar, color.lime, size=size.small)
-plotshape(isBearishNoWick and isInSession, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
-
-// Plot entry levels when pending
-entryLevel = longPending ? longEntryPrice : shortPending ? shortEntryPrice : na
-slLevel = longPending ? longStopLoss : shortPending ? shortStopLoss : na
-tpLevel = longPending ? longTakeProfit : shortPending ? shortTakeProfit : na
-
-plot(entryLevel, "Entry Level", color=color.yellow, style=plot.style_linebr, linewidth=2)
-plot(slLevel, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=1)
-plot(tpLevel, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=1)
-
-// ==================== DEBUG INFO ====================
-// Table to show current conditions
-var table debugTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80))
-
-if barstate.islast
-    table.cell(debugTable, 0, 0, "Condition", text_color=color.white)
-    table.cell(debugTable, 1, 0, "Value", text_color=color.white)
-    
-    table.cell(debugTable, 0, 1, "Trend", text_color=color.white)
-    table.cell(debugTable, 1, 1, isUptrend ? "UP" : "DOWN", text_color=isUptrend ? color.green : color.red)
-    
-    table.cell(debugTable, 0, 2, "Body/ATR", text_color=color.white)
-    table.cell(debugTable, 1, 2, str.tostring(bodyAtrRatio, "#.##"), text_color=color.white)
-    
-    table.cell(debugTable, 0, 3, "Lower Wick %", text_color=color.white)
-    table.cell(debugTable, 1, 3, str.tostring(lowerWickPercent * 100, "#.#") + "%", text_color=color.white)
-    
-    table.cell(debugTable, 0, 4, "Upper Wick %", text_color=color.white)
-    table.cell(debugTable, 1, 4, str.tostring(upperWickPercent * 100, "#.#") + "%", text_color=color.white)
-    
-    table.cell(debugTable, 0, 5, "ATR", text_color=color.white)
-    table.cell(debugTable, 1, 5, str.tostring(atr, "#.##"), text_color=color.white)
-    
-    table.cell(debugTable, 0, 6, "Long Pending", text_color=color.white)
-    table.cell(debugTable, 1, 6, longPending ? "YES" : "NO", text_color=longPending ? color.green : color.gray)
-    
-    table.cell(debugTable, 0, 7, "Short Pending", text_color=color.white)
-    table.cell(debugTable, 1, 7, shortPending ? "YES" : "NO", text_color=shortPending ? color.red : color.gray)
+plotshape(isBullishNoWick and isInSession and strategy.position_size == 0, "Bullish No Wick", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(isBearishNoWick and isInSession and strategy.position_size == 0, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
