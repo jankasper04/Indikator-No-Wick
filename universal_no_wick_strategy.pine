@@ -98,84 +98,80 @@ isLowerHigh = h0 < h1
 isLowerLow = l0 < l1
 
 // ==================== MARKET STRUCTURE STATE ====================
-// -1 = Bearish, 1 = Bullish
-var int marketStructure = 0
-
-// Base structure from swing points (before ChoCH override)
-baseStructure = 0
-if isHigherHigh and isHigherLow
-    baseStructure := 1
-else if isLowerHigh and isLowerLow
-    baseStructure := -1
-else
-    baseStructure := nz(marketStructure[1], 0)
+var int marketStructure = 0  // -1 = Bearish, 0 = Neutral, 1 = Bullish
 
 // ==================== ChoCH - CHANGE OF CHARACTER ====================
-// ChoCH Bullish: In bearish structure, candle CLOSES above last High
-// ChoCH Bearish: In bullish structure, candle CLOSES below last Low
+// ChoCH Bullish: Close above a Lower High (LH) → Structure shifts to Bullish
+// ChoCH Bearish: Close below a Higher Low (HL) → Structure shifts to Bearish
 
 var bool chochBullishTriggered = false
 var bool chochBearishTriggered = false
-var float chochBullishLevel = na
-var float chochBearishLevel = na
-var int chochBullishBar = na
-var int chochBearishBar = na
+var float chochLevel = na
+var int chochBar = na
 
 chochBullish = false
 chochBearish = false
 
-// Check ChoCH FIRST before setting market structure
-// Bullish ChoCH: Structure was bearish and close above the last high
-if marketStructure[1] == -1 and close > h0 and not chochBullishTriggered
+// Bullish ChoCH: Price closes above the last high AND that high was a Lower High (LH)
+// This indicates a shift from bearish to bullish
+if close > h0 and isLowerHigh and not chochBullishTriggered and marketStructure != 1
     chochBullish := true
     chochBullishTriggered := true
     chochBearishTriggered := false
-    chochBullishLevel := h0
-    chochBullishBar := h0i
+    chochLevel := h0
+    chochBar := h0i
+    marketStructure := 1  // Shift to Bullish
 
-// Bearish ChoCH: Structure was bullish and close below the last low
-if marketStructure[1] == 1 and close < l0 and not chochBearishTriggered
+// Bearish ChoCH: Price closes below the last low AND that low was a Higher Low (HL)
+// This indicates a shift from bullish to bearish
+if close < l0 and isHigherLow and not chochBearishTriggered and marketStructure != -1
     chochBearish := true
     chochBearishTriggered := true
     chochBullishTriggered := false
-    chochBearishLevel := l0
-    chochBearishBar := l0i
-
-// ==================== UPDATE MARKET STRUCTURE ====================
-// ChoCH overrides the base structure immediately
-if chochBullish
-    marketStructure := 1
-else if chochBearish
-    marketStructure := -1
-else
-    marketStructure := baseStructure
-
-// Reset ChoCH triggers when structure changes via swing points
-if ta.change(baseStructure) != 0
-    if baseStructure == 1
-        chochBullishTriggered := false
-    if baseStructure == -1
-        chochBearishTriggered := false
+    chochLevel := l0
+    chochBar := l0i
+    marketStructure := -1  // Shift to Bearish
 
 // ==================== BOS - BREAK OF STRUCTURE ====================
+// BOS Bullish: In bullish structure, close above a Higher High (HH) → Continuation
+// BOS Bearish: In bearish structure, close below a Lower Low (LL) → Continuation
+
 var bool bosBullishTriggered = false
 var bool bosBearishTriggered = false
+var float bosLevel = na
+var int bosBar = na
 
 bosBullish = false
 bosBearish = false
 
-// BOS only in confirmed structure (not on ChoCH candle)
-if marketStructure == 1 and marketStructure[1] == 1 and close > h0 and not bosBullishTriggered and not chochBullish
+// BOS Bullish: Already bullish, close above last HH (continuation)
+if close > h0 and isHigherHigh and marketStructure == 1 and not bosBullishTriggered
     bosBullish := true
     bosBullishTriggered := true
+    bosLevel := h0
+    bosBar := h0i
 
-if marketStructure == -1 and marketStructure[1] == -1 and close < l0 and not bosBearishTriggered and not chochBearish
+// BOS Bearish: Already bearish, close below last LL (continuation)
+if close < l0 and isLowerLow and marketStructure == -1 and not bosBearishTriggered
     bosBearish := true
     bosBearishTriggered := true
+    bosLevel := l0
+    bosBar := l0i
 
+// Reset triggers when new swing points form
 if ta.change(zigzagTrend) != 0
+    chochBullishTriggered := false
+    chochBearishTriggered := false
     bosBullishTriggered := false
     bosBearishTriggered := false
+
+// ==================== UPDATE STRUCTURE FROM SWING POINTS ====================
+// If no ChoCH, update structure based on swing point pattern
+if not chochBullish and not chochBearish
+    if isHigherHigh and isHigherLow
+        marketStructure := 1
+    else if isLowerHigh and isLowerLow
+        marketStructure := -1
 
 // ==================== FINAL STRUCTURE STATUS ====================
 isMSBullishStructure = marketStructure == 1
@@ -206,27 +202,26 @@ if ta.change(zigzagTrend) != 0 and show_hh_ll and trendMethod == "Market Structu
 
 // ==================== ChoCH VISUALIZATION ====================
 if chochBullish and show_choch and trendMethod == "Market Structure"
-    chochLine = line.new(chochBullishBar, chochBullishLevel, bar_index, chochBullishLevel, color=color.green, width=2, style=line.style_solid)
-    chochLabel = label.new(bar_index, chochBullishLevel, "ChoCH ↑", color=color.new(color.green, 70), style=label.style_label_up, textcolor=color.white, size=size.small)
+    line.new(chochBar, chochLevel, bar_index, chochLevel, color=color.green, width=2, style=line.style_solid)
+    label.new(bar_index, chochLevel, "ChoCH ↑", color=color.new(color.green, 70), style=label.style_label_up, textcolor=color.white, size=size.small)
 
 if chochBearish and show_choch and trendMethod == "Market Structure"
-    chochLine = line.new(chochBearishBar, chochBearishLevel, bar_index, chochBearishLevel, color=color.red, width=2, style=line.style_solid)
-    chochLabel = label.new(bar_index, chochBearishLevel, "ChoCH ↓", color=color.new(color.red, 70), style=label.style_label_down, textcolor=color.white, size=size.small)
+    line.new(chochBar, chochLevel, bar_index, chochLevel, color=color.red, width=2, style=line.style_solid)
+    label.new(bar_index, chochLevel, "ChoCH ↓", color=color.new(color.red, 70), style=label.style_label_down, textcolor=color.white, size=size.small)
 
 // ==================== BOS VISUALIZATION ====================
 if bosBullish and show_bos and trendMethod == "Market Structure"
-    bosLine = line.new(h0i, h0, bar_index, h0, color=color.teal, width=1, style=line.style_dashed)
-    bosLabel = label.new(bar_index, h0, "BOS", color=color.new(color.teal, 70), style=label.style_label_down, textcolor=color.white, size=size.tiny)
+    line.new(bosBar, bosLevel, bar_index, bosLevel, color=color.teal, width=1, style=line.style_dashed)
+    label.new(bar_index, bosLevel, "BOS ↑", color=color.new(color.teal, 70), style=label.style_label_down, textcolor=color.white, size=size.tiny)
 
 if bosBearish and show_bos and trendMethod == "Market Structure"
-    bosLine = line.new(l0i, l0, bar_index, l0, color=color.orange, width=1, style=line.style_dashed)
-    bosLabel = label.new(bar_index, l0, "BOS", color=color.new(color.orange, 70), style=label.style_label_up, textcolor=color.white, size=size.tiny)
+    line.new(bosBar, bosLevel, bar_index, bosLevel, color=color.orange, width=1, style=line.style_dashed)
+    label.new(bar_index, bosLevel, "BOS ↓", color=color.new(color.orange, 70), style=label.style_label_up, textcolor=color.white, size=size.tiny)
 
 // ==================== NO WICK CANDLE DETECTION ====================
 bullishNoBottomWick = open == low and close > open
 bearishNoTopWick = open == high and close < open
 
-// IMPORTANT: Use current bar's structure (after ChoCH update)
 isBullishNoWick = bullishNoBottomWick and isBullishStructure
 isBearishNoWick = bearishNoTopWick and isBearishStructure
 
@@ -266,7 +261,6 @@ var bool inLong = false
 var bool inShort = false
 
 // ==================== LONG SETUP ====================
-// Only go LONG if structure is BULLISH
 if isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending
     if not na(entryBox)
         box.delete(entryBox)
@@ -287,7 +281,6 @@ if isBullishNoWick and isInSession and strategy.position_size == 0 and not longP
     strategy.entry("Long", strategy.long, limit=longEntryPrice, qty=contracts)
 
 // ==================== SHORT SETUP ====================
-// Only go SHORT if structure is BEARISH
 if isBearishNoWick and isInSession and strategy.position_size == 0 and not shortPending and not longPending
     if not na(entryBox)
         box.delete(entryBox)
@@ -391,7 +384,6 @@ plot(inLong or inShort ? strategy.position_avg_price : na, "Entry", color=color.
 plotshape(bullishNoBottomWick, "Bullish No Wick (All)", shape.triangleup, location.belowbar, color.green, size=size.small)
 plotshape(bearishNoTopWick, "Bearish No Wick (All)", shape.triangledown, location.abovebar, color.red, size=size.small)
 
-// Show tradeable signals with structure confirmation
 plotshape(isBullishNoWick and isInSession and strategy.position_size == 0 and not longPending and not shortPending, "Long Signal", shape.circle, location.belowbar, color.lime, size=size.tiny, offset=-1)
 plotshape(isBearishNoWick and isInSession and strategy.position_size == 0 and not shortPending and not longPending, "Short Signal", shape.circle, location.abovebar, color.fuchsia, size=size.tiny, offset=-1)
 
@@ -420,9 +412,9 @@ if barstate.islast
     table.cell(infoTable, 1, 9, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
 
 // ==================== ALERTS ====================
-alertcondition(chochBullish, "Bullish ChoCH", "Bullish Change of Character - Close above structure!")
-alertcondition(chochBearish, "Bearish ChoCH", "Bearish Change of Character - Close below structure!")
-alertcondition(bosBullish, "Bullish BOS", "Bullish Break of Structure!")
-alertcondition(bosBearish, "Bearish BOS", "Bearish Break of Structure!")
+alertcondition(chochBullish, "Bullish ChoCH", "Bullish Change of Character - Close above LH!")
+alertcondition(chochBearish, "Bearish ChoCH", "Bearish Change of Character - Close below HL!")
+alertcondition(bosBullish, "Bullish BOS", "Bullish Break of Structure - Close above HH!")
+alertcondition(bosBearish, "Bearish BOS", "Bearish Break of Structure - Close below LL!")
 alertcondition(isBullishNoWick, "Long Signal", "Bullish No Wick in Bullish Structure - LONG!")
 alertcondition(isBearishNoWick, "Short Signal", "Bearish No Wick in Bearish Structure - SHORT!")
