@@ -37,7 +37,9 @@ color_4h = input.color(color.aqua, "4h Marker Color", group=htfSettings, display
 tradeSettings = "Trade Settings"
 contracts = input.int(1, "Number of Contracts", minval=1, group=tradeSettings, display=display.data_window)
 cancelAfter = input.int(10, "Cancel Order After X Candles", minval=1, group=tradeSettings, display=display.data_window)
-atrMultiplier = input.float(1.5, "ATR Multiplier for SL", minval=0.1, step=0.1, group=tradeSettings, display=display.data_window)
+slMethod = input.string("ATR", "Stop Loss Method", options=["ATR", "Structure (Last High/Low)"], group=tradeSettings, display=display.data_window)
+atrMultiplier = input.float(1.5, "ATR Multiplier for SL", minval=0.1, step=0.1, group=tradeSettings, display=display.data_window, tooltip="Used when SL Method = ATR")
+structureBuffer = input.float(0.5, "Structure Buffer (ATR)", minval=0.0, step=0.1, group=tradeSettings, display=display.data_window, tooltip="Buffer added to structure level (in ATR units). Used when SL Method = Structure")
 tpMultiplier = input.float(2.0, "TP (x SL)", minval=0.1, step=0.1, group=tradeSettings, display=display.data_window)
 showHistoricalTrades = input.bool(true, "Show Historical Entry/SL/TP Lines", group=tradeSettings, display=display.data_window)
 
@@ -378,8 +380,15 @@ if bullishNoBottomWick and canGoLong
     
     longEntryPrice := open
     signalAtr := atr
-    longStopLoss := longEntryPrice - (signalAtr * atrMultiplier)
-    longTakeProfit := longEntryPrice + (signalAtr * atrMultiplier * tpMultiplier)
+    
+    // Calculate SL based on selected method
+    if slMethod == "ATR"
+        longStopLoss := longEntryPrice - (signalAtr * atrMultiplier)
+    else // Structure (Last High/Low)
+        longStopLoss := l0 - (signalAtr * structureBuffer)  // Below last structural low
+    
+    slDistance = longEntryPrice - longStopLoss
+    longTakeProfit := longEntryPrice + (slDistance * tpMultiplier)
     longOrderBars := 0
     longPending := true
     longEntryBar := bar_index
@@ -401,8 +410,15 @@ if bearishNoTopWick and canGoShort
     
     shortEntryPrice := open
     signalAtr := atr
-    shortStopLoss := shortEntryPrice + (signalAtr * atrMultiplier)
-    shortTakeProfit := shortEntryPrice - (signalAtr * atrMultiplier * tpMultiplier)
+    
+    // Calculate SL based on selected method
+    if slMethod == "ATR"
+        shortStopLoss := shortEntryPrice + (signalAtr * atrMultiplier)
+    else // Structure (Last High/Low)
+        shortStopLoss := h0 + (signalAtr * structureBuffer)  // Above last structural high
+    
+    slDistance = shortStopLoss - shortEntryPrice
+    shortTakeProfit := shortEntryPrice - (slDistance * tpMultiplier)
     shortOrderBars := 0
     shortPending := true
     shortEntryBar := bar_index
@@ -419,8 +435,15 @@ if strategy.position_size > 0 and not inLong
     inShort := false
     longPending := false
     activeEntry := strategy.position_avg_price
-    activeSL := activeEntry - (signalAtr * atrMultiplier)
-    activeTP := activeEntry + (signalAtr * atrMultiplier * tpMultiplier)
+    
+    // Calculate SL based on selected method
+    if slMethod == "ATR"
+        activeSL := activeEntry - (signalAtr * atrMultiplier)
+    else // Structure
+        activeSL := longStopLoss  // Use pre-calculated structure-based SL
+    
+    slDist = activeEntry - activeSL
+    activeTP := activeEntry + (slDist * tpMultiplier)
     strategy.exit("Long Exit", "Long", stop=activeSL, limit=activeTP)
     
     if showHistoricalTrades
@@ -440,8 +463,15 @@ if strategy.position_size < 0 and not inShort
     inLong := false
     shortPending := false
     activeEntry := strategy.position_avg_price
-    activeSL := activeEntry + (signalAtr * atrMultiplier)
-    activeTP := activeEntry - (signalAtr * atrMultiplier * tpMultiplier)
+    
+    // Calculate SL based on selected method
+    if slMethod == "ATR"
+        activeSL := activeEntry + (signalAtr * atrMultiplier)
+    else // Structure
+        activeSL := shortStopLoss  // Use pre-calculated structure-based SL
+    
+    slDist = activeSL - activeEntry
+    activeTP := activeEntry - (slDist * tpMultiplier)
     strategy.exit("Short Exit", "Short", stop=activeSL, limit=activeTP)
     
     if showHistoricalTrades
