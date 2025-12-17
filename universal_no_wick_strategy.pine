@@ -242,58 +242,46 @@ f_noWickStats(tf) =>
 
 // Count no-wick candles over lookback period
 // Current timeframe
-var int countBullCurrent = 0
-var int countBearCurrent = 0
-var int countTotalCurrent = 0
-
-countBullCurrent := math.sum(bullishNoBottomWick ? 1 : 0, statsLookback)
-countBearCurrent := math.sum(bearishNoTopWick ? 1 : 0, statsLookback)
-countTotalCurrent := countBullCurrent + countBearCurrent
+countBullCurrent = math.sum(bullishNoBottomWick ? 1 : 0, statsLookback)
+countBearCurrent = math.sum(bearishNoTopWick ? 1 : 0, statsLookback)
+countTotalCurrent = countBullCurrent + countBearCurrent
 
 // M15
-var int countBull15 = 0
-var int countBear15 = 0
-countBull15 := math.sum(bull15 ? 1 : 0, statsLookback)
-countBear15 := math.sum(bear15 ? 1 : 0, statsLookback)
+countBull15 = math.sum(bull15 ? 1 : 0, statsLookback)
+countBear15 = math.sum(bear15 ? 1 : 0, statsLookback)
 
 // M30
-var int countBull30 = 0
-var int countBear30 = 0
-countBull30 := math.sum(bull30 ? 1 : 0, statsLookback)
-countBear30 := math.sum(bear30 ? 1 : 0, statsLookback)
+countBull30 = math.sum(bull30 ? 1 : 0, statsLookback)
+countBear30 = math.sum(bear30 ? 1 : 0, statsLookback)
 
 // H1
-var int countBull60 = 0
-var int countBear60 = 0
-countBull60 := math.sum(bull60 ? 1 : 0, statsLookback)
-countBear60 := math.sum(bear60 ? 1 : 0, statsLookback)
+countBull60 = math.sum(bull60 ? 1 : 0, statsLookback)
+countBear60 = math.sum(bear60 ? 1 : 0, statsLookback)
 
 // H4
-var int countBull240 = 0
-var int countBear240 = 0
-countBull240 := math.sum(bull240 ? 1 : 0, statsLookback)
-countBear240 := math.sum(bear240 ? 1 : 0, statsLookback)
+countBull240 = math.sum(bull240 ? 1 : 0, statsLookback)
+countBear240 = math.sum(bear240 ? 1 : 0, statsLookback)
 
 // Calculate percentages
-pctCurrent = statsLookback > 0 ? (countTotalCurrent / statsLookback) * 100 : 0
-pctBullCurrent = statsLookback > 0 ? (countBullCurrent / statsLookback) * 100 : 0
-pctBearCurrent = statsLookback > 0 ? (countBearCurrent / statsLookback) * 100 : 0
+float pctCurrent = statsLookback > 0 ? (countTotalCurrent / statsLookback) * 100 : 0
+float pctBullCurrent = statsLookback > 0 ? (countBullCurrent / statsLookback) * 100 : 0
+float pctBearCurrent = statsLookback > 0 ? (countBearCurrent / statsLookback) * 100 : 0
 
-pct15 = statsLookback > 0 ? ((countBull15 + countBear15) / statsLookback) * 100 : 0
-pctBull15 = statsLookback > 0 ? (countBull15 / statsLookback) * 100 : 0
-pctBear15 = statsLookback > 0 ? (countBear15 / statsLookback) * 100 : 0
+float pct15 = statsLookback > 0 ? ((countBull15 + countBear15) / statsLookback) * 100 : 0
+float pctBull15 = statsLookback > 0 ? (countBull15 / statsLookback) * 100 : 0
+float pctBear15 = statsLookback > 0 ? (countBear15 / statsLookback) * 100 : 0
 
-pct30 = statsLookback > 0 ? ((countBull30 + countBear30) / statsLookback) * 100 : 0
-pctBull30 = statsLookback > 0 ? (countBull30 / statsLookback) * 100 : 0
-pctBear30 = statsLookback > 0 ? (countBear30 / statsLookback) * 100 : 0
+float pct30 = statsLookback > 0 ? ((countBull30 + countBear30) / statsLookback) * 100 : 0
+float pctBull30 = statsLookback > 0 ? (countBull30 / statsLookback) * 100 : 0
+float pctBear30 = statsLookback > 0 ? (countBear30 / statsLookback) * 100 : 0
 
-pct60 = statsLookback > 0 ? ((countBull60 + countBear60) / statsLookback) * 100 : 0
-pctBull60 = statsLookback > 0 ? (countBull60 / statsLookback) * 100 : 0
-pctBear60 = statsLookback > 0 ? (countBear60 / statsLookback) * 100 : 0
+float pct60 = statsLookback > 0 ? ((countBull60 + countBear60) / statsLookback) * 100 : 0
+float pctBull60 = statsLookback > 0 ? (countBull60 / statsLookback) * 100 : 0
+float pctBear60 = statsLookback > 0 ? (countBear60 / statsLookback) * 100 : 0
 
-pct240 = statsLookback > 0 ? ((countBull240 + countBear240) / statsLookback) * 100 : 0
-pctBull240 = statsLookback > 0 ? (countBull240 / statsLookback) * 100 : 0
-pctBear240 = statsLookback > 0 ? (countBear240 / statsLookback) * 100 : 0
+float pct240 = statsLookback > 0 ? ((countBull240 + countBear240) / statsLookback) * 100 : 0
+float pctBull240 = statsLookback > 0 ? (countBull240 / statsLookback) * 100 : 0
+float pctBear240 = statsLookback > 0 ? (countBear240 / statsLookback) * 100 : 0
 
 // ==================== HTF START DETECTION ====================
 is30mStart = ta.change(time("30")) != 0
