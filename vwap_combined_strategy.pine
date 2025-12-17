@@ -4,10 +4,10 @@
 //@version=6
 
 strategy(title="VWAP Combined Strategy", shorttitle="VWAP Strategy", overlay=true, 
-  max_bars_back=1000, max_lines_count=500,
+  max_bars_back=1000,
   initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100,
   commission_type=strategy.commission.percent, commission_value=0.04,
-  slippage=1, pyramiding=0, calc_on_every_tick=false)
+  pyramiding=0)
 
 // ============================================
 // STRATEGY SETTINGS
@@ -16,190 +16,55 @@ STRATEGY_GROUP = "Strategy Settings"
 atrLength = input.int(14, "ATR Period", minval=1, group=STRATEGY_GROUP)
 atrMultSL = input.float(1.0, "ATR Multiplier for SL", minval=0.1, step=0.1, group=STRATEGY_GROUP)
 riskReward = input.float(1.5, "Risk-Reward Ratio", minval=0.5, step=0.1, group=STRATEGY_GROUP)
-useSessionFilter = input.bool(false, "Only Trade During Sessions", group=STRATEGY_GROUP)
 
 // ============================================
 // VWAP SETTINGS
 // ============================================
 VWAP_GROUP = "VWAP Settings"
-showVWAP = input.bool(true, title="Show VWAP", group=VWAP_GROUP)
-hideonDWM = input.bool(false, title="Hide VWAP on 1D or Above", group=VWAP_GROUP, display=display.data_window)
 var anchor = input.string(defval="Session", title="Anchor Period",
-     options=["Session", "Week", "Month", "Quarter", "Year", "Decade", "Century", "Earnings", "Dividends", "Splits"], group=VWAP_GROUP)
-vwapSrc = input.source(title="Source", defval=hlc3, group=VWAP_GROUP, display=display.data_window)
-vwapOffset = input.int(0, title="Offset", group=VWAP_GROUP, minval=0, display=display.data_window)
-
-// VWAP Bands Settings
-BANDS_GROUP = "VWAP Bands Settings"
-CALC_MODE_TOOLTIP = "Determines the units used to calculate the distance of the bands. When 'Percentage' is selected, a multiplier of 1 means 1%."
-calcModeInput = input.string("Standard Deviation", "Bands Calculation Mode", options=["Standard Deviation", "Percentage"], group=BANDS_GROUP, tooltip=CALC_MODE_TOOLTIP, display=display.data_window)
-showBand_1 = input.bool(true, title="", group=BANDS_GROUP, inline="band_1", display=display.data_window)
-bandMult_1 = input.float(1.0, title="Bands Multiplier #1", group=BANDS_GROUP, inline="band_1", step=0.5, minval=0, display=display.data_window)
-showBand_2 = input.bool(false, title="", group=BANDS_GROUP, inline="band_2", display=display.data_window)
-bandMult_2 = input.float(2.0, title="Bands Multiplier #2", group=BANDS_GROUP, inline="band_2", step=0.5, minval=0, display=display.data_window)
-showBand_3 = input.bool(false, title="", group=BANDS_GROUP, inline="band_3", display=display.data_window)
-bandMult_3 = input.float(3.0, title="Bands Multiplier #3", group=BANDS_GROUP, inline="band_3", step=0.5, minval=0, display=display.data_window)
-
-// ============================================
-// EMA TREND BARS SETTINGS
-// ============================================
-EMA_GROUP = "EMA Trend Settings"
-showEMA = input.bool(true, title="Show EMA", group=EMA_GROUP)
-emaLength = input.int(34, minval=1, maxval=300, title="EMA Length", group=EMA_GROUP)
-useEmaBarColor = input.bool(true, title="Color Bars Based on EMA Trend", group=EMA_GROUP)
-emaUpColor = input.color(color.lime, title="EMA Uptrend Color", group=EMA_GROUP)
-emaDownColor = input.color(color.red, title="EMA Downtrend Color", group=EMA_GROUP)
+     options=["Session", "Week", "Month", "Quarter", "Year"], group=VWAP_GROUP)
+bandMult = input.float(1.0, title="Band Multiplier", group=VWAP_GROUP, step=0.5, minval=0.1)
 
 // ============================================
 // VOLUME PROFILE SETTINGS
 // ============================================
-VP_BASIC_GROUP = "Volume Profile - Basic"
-showVP = input.bool(true, 'Show Volume Profile', group=VP_BASIC_GROUP)
-vpLength = input.int(300, 'Lookback', minval=1, maxval=1000, group=VP_BASIC_GROUP,
-  tooltip='Number of most recent bars to use for the calculation of the volume profile')
-vpRow = input.int(26, 'Zeilengröße', minval=1, maxval=500, group=VP_BASIC_GROUP,
-  tooltip='Determines the number of rows used for the calculation of the volume profile')
-show_rpoc = input.bool(true, 'Show Rolling POC', group=VP_BASIC_GROUP,
-  tooltip='Determines whether to display the rolling POC of the volume profile')
-
-VP_STYLE_GROUP = "Volume Profile - Style"
-vpWidth = input.int(50, 'Width (% of the box)', minval=1, maxval=100, group=VP_STYLE_GROUP,
-  tooltip='Determines the length of the bars relative to the Lookback value')
-vp_bar_width = input.int(2, 'Bar Width', group=VP_STYLE_GROUP,
-  tooltip='Width of each bar')
-vpFlip = input.bool(false, 'Flip Histogram', group=VP_STYLE_GROUP,
-  tooltip='Flip the histogram, when enabled, the histogram base will be located at the most recent candle')
-vpGrad = input.bool(true, 'Gradient', group=VP_STYLE_GROUP,
-  tooltip='Allows to color the volume profile bars with a gradient, with a color intensity determined by the length of each bar')
-vpSolid = input.color(#2157f3, 'Rows Solid Color', group=VP_STYLE_GROUP,
-  tooltip='Color of each bar when "Gradient" is disabled')
-poc_color = input.color(#ff0000, 'Rolling POC', group=VP_STYLE_GROUP,
-  tooltip='Color of the POC')
-
-// ============================================
-// SESSIONS SETTINGS
-// ============================================
-SESSIONS_GROUP = "Sessions Settings"
-showSessions = input.bool(true, title="Show Sessions", group=SESSIONS_GROUP)
-bgColorSessions = input.bool(false, "Activate High/Low View (instead of Background)", group=SESSIONS_GROUP)
-sessionRes = input.timeframe("D", "Resolution", group=SESSIONS_GROUP)
-
-// Session Time Inputs
-SESSIONS_TIME_GROUP = "Session Times"
-sessionTimezone = input.string("America/New_York", "Timezone", group=SESSIONS_TIME_GROUP, 
-  options=["America/New_York", "America/Chicago", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Europe/Paris", "Europe/Zurich", "Asia/Tokyo", "Asia/Hong_Kong", "Asia/Singapore", "Asia/Sydney", "UTC"],
-  tooltip="Timezone for session calculations")
-london = input.session("0300-1200:1234567", "London Session", group=SESSIONS_TIME_GROUP)
-ny = input.session("0800-1700:1234567", "New York Session", group=SESSIONS_TIME_GROUP)
-tokyo = input.session("2000-0400:1234567", "Tokyo Session", group=SESSIONS_TIME_GROUP)
-sydney = input.session("1700-0200:1234567", "Sydney Session", group=SESSIONS_TIME_GROUP)
-
-// Session Toggle Inputs
-SESSIONS_TOGGLE_GROUP = "Session Toggles"
-showLondon = input.bool(true, "London Session", group=SESSIONS_TOGGLE_GROUP)
-showNY = input.bool(true, "New York Session", group=SESSIONS_TOGGLE_GROUP)
-showTokyo = input.bool(true, "Tokyo Session", group=SESSIONS_TOGGLE_GROUP)
-showSydney = input.bool(false, "Sydney Session", group=SESSIONS_TOGGLE_GROUP)
-
-// Session Colors
-SESSIONS_COLOR_GROUP = "Session Colors"
-LondonColor = input.color(color.new(color.green, 90), "London Color", group=SESSIONS_COLOR_GROUP)
-NYColor = input.color(color.new(color.red, 90), "New York Color", group=SESSIONS_COLOR_GROUP)
-AsiaColor = input.color(color.new(color.yellow, 90), "Tokyo Color", group=SESSIONS_COLOR_GROUP)
-SydneyColor = input.color(color.new(color.blue, 90), "Sydney Color", group=SESSIONS_COLOR_GROUP)
-
-// ============================================
-// VOLUME PROFILE - COLOR GRADIENT ARRAY
-// ============================================
-var color[] vol_css = array.new_color()
-var line[] vpLines = array.new_line()
-var line pocLine = na
-
-if barstate.isfirst and showVP
-    gradientColors = array.from(#1E152A, #1E162B, #1F182C, #1F192E, #201B2F, #211C31, #211E32, #222034, #222135, #232337, #242438, #24263A, #25273B, #25293D, #262B3E, #272C3F, #272E41, #282F42, #283144, #293245, #2A3447, #2A3648, #2B374A, #2B394B, #2C3A4D, #2D3C4E, #2D3D50, #2E3F51, #2E4153, #2F4254, #304455, #304557, #314758, #32495A, #324A5B, #334C5D, #334D5E, #344F60, #355061, #355263, #365464, #365566, #375767, #385868, #385A6A, #395B6B, #395D6D, #3A5F6E, #3B6070, #3B6271, #3C6373, #3C6574, #3D6676, #3E6877, #3E6A79, #3F6B7A, #3F6D7C, #406E7D, #41707E, #417180, #427381, #427583, #437684, #447886, #447987, #457B89, #467D8A, #467E8C, #47808D, #47818F, #488390, #498491, #498693, #4A8894, #4A8996, #4B8B97, #4C8C99, #4C8E9A, #4D8F9C, #4D919D, #4E939F, #4F94A0, #4F96A2, #5097A3, #5099A5, #519AA6, #529CA7, #529EA9, #539FAA, #53A1AC, #54A2AD, #55A4AF, #55A5B0, #56A7B2, #56A9B3, #57AAB5, #58ACB6, #58ADB8, #59AFB9, #5AB1BB)
-    vol_css := gradientColors
-    
-    for i = 0 to vpRow - 1
-        array.push(vpLines, line.new(na, na, na, na, width=vp_bar_width))
-    
-    pocLine := line.new(na, na, na, na, width=vp_bar_width, style=line.style_dotted)
+VP_GROUP = "Volume Profile"
+vpLength = input.int(300, 'Lookback', minval=1, maxval=1000, group=VP_GROUP)
+vpRow = input.int(26, 'Row Size', minval=1, maxval=500, group=VP_GROUP)
 
 // ============================================
 // VWAP CALCULATIONS
 // ============================================
-cumVolume = ta.cum(volume)
-if barstate.islast and cumVolume == 0
-    runtime.error("No volume is provided by the data vendor.")
-
-new_earnings = request.earnings(syminfo.tickerid, earnings.actual, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
-new_dividends = request.dividends(syminfo.tickerid, dividends.gross, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
-new_split = request.splits(syminfo.tickerid, splits.denominator, barmerge.gaps_on, barmerge.lookahead_on, ignore_invalid_symbol=true)
-
 isNewPeriod = switch anchor
-    "Earnings"  => not na(new_earnings)
-    "Dividends" => not na(new_dividends)
-    "Splits"    => not na(new_split)
     "Session"   => timeframe.change("D")
     "Week"      => timeframe.change("W")
     "Month"     => timeframe.change("M")
     "Quarter"   => timeframe.change("3M")
     "Year"      => timeframe.change("12M")
-    "Decade"    => timeframe.change("12M") and year % 10 == 0
-    "Century"   => timeframe.change("12M") and year % 100 == 0
     => false
 
-isEsdAnchor = anchor == "Earnings" or anchor == "Dividends" or anchor == "Splits"
-if na(vwapSrc[1]) and not isEsdAnchor
+if na(hlc3[1])
     isNewPeriod := true
 
-float vwapValue = na
-float upperBandValue1 = na
-float lowerBandValue1 = na
-float upperBandValue2 = na
-float lowerBandValue2 = na
-float upperBandValue3 = na
-float lowerBandValue3 = na
-
-if not (hideonDWM and timeframe.isdwm)
-    [_vwap, _stdevUpper, _] = ta.vwap(vwapSrc, isNewPeriod, 1)
-    vwapValue := _vwap
-    stdevAbs = _stdevUpper - _vwap
-    bandBasis = calcModeInput == "Standard Deviation" ? stdevAbs : _vwap * 0.01
-    upperBandValue1 := _vwap + bandBasis * bandMult_1
-    lowerBandValue1 := _vwap - bandBasis * bandMult_1
-    upperBandValue2 := _vwap + bandBasis * bandMult_2
-    lowerBandValue2 := _vwap - bandBasis * bandMult_2
-    upperBandValue3 := _vwap + bandBasis * bandMult_3
-    lowerBandValue3 := _vwap - bandBasis * bandMult_3
+[vwapValue, stdevUpper, _] = ta.vwap(hlc3, isNewPeriod, 1)
+stdevAbs = stdevUpper - vwapValue
+upperBand = vwapValue + stdevAbs * bandMult
+lowerBand = vwapValue - stdevAbs * bandMult
 
 // ============================================
-// EMA CALCULATIONS
-// ============================================
-usedEma = ta.ema(close, emaLength)
-emaUpTrend = hlc3 >= usedEma
-emaColor = emaUpTrend ? emaUpColor : emaDownColor
-
-// Bar coloring based on EMA trend
-barcolor(useEmaBarColor ? emaColor : na)
-
-// ============================================
-// ATR CALCULATION FOR STRATEGY
+// ATR CALCULATION
 // ============================================
 atrValue = ta.atr(atrLength)
 
 // ============================================
-// VOLUME PROFILE CALCULATIONS
+// VOLUME PROFILE - POC CALCULATION
 // ============================================
-var float vpAlvl = 0.0
-var float vpBlvl = 0.0
 var float pocValue = 0.0
 
 vpHighest = ta.highest(high, vpLength)
 vpLowest = ta.lowest(low, vpLength)
 
-vpCondition = showVP and (show_rpoc ? true : barstate.islast)
-
-if vpCondition and array.size(vpLines) > 0
+if barstate.isconfirmed
     float[] levels = array.new_float(vpRow + 1)
     float[] sumv = array.new_float(vpRow, 0.0)
     
@@ -219,187 +84,50 @@ if vpCondition and array.size(vpLines) > 0
     maxVol = array.max(sumv)
     maxVolIdx = array.indexof(sumv, maxVol)
     
-    for j = 0 to vpRow - 1
-        if j < array.size(vpLines)
-            currentVol = array.get(sumv, j)
-            mult = maxVol > 0 ? currentVol / maxVol : 0
-            lvl = array.get(levels, j)
-            lineLen = math.round(vpLength * vpWidth / 100 * mult)
-            
-            l = array.get(vpLines, j)
-            if vpFlip
-                line.set_xy1(l, bar_index, lvl)
-                line.set_xy2(l, bar_index - lineLen, lvl)
-            else
-                line.set_xy1(l, bar_index - vpLength + 1, lvl)
-                line.set_xy2(l, bar_index - vpLength + 1 + lineLen, lvl)
-            
-            lineColor = vpGrad ? array.get(vol_css, math.min(math.round(mult * 99), 99)) : vpSolid
-            line.set_color(l, lineColor)
-            line.set_width(l, vp_bar_width)
-    
-    if not na(pocLine) and maxVolIdx >= 0
-        pocLvl = math.avg(array.get(levels, maxVolIdx), array.get(levels, maxVolIdx + 1))
-        pocValue := pocLvl
-        if vpFlip
-            line.set_xy1(pocLine, bar_index, pocLvl)
-            line.set_xy2(pocLine, bar_index - vpLength + 1, pocLvl)
-        else
-            line.set_xy1(pocLine, bar_index - vpLength + 1, pocLvl)
-            line.set_xy2(pocLine, bar_index, pocLvl)
-        line.set_color(pocLine, vpGrad ? #5AB1BB : poc_color)
-        
-        if show_rpoc
-            vpAlvl := array.get(levels, maxVolIdx)
-            vpBlvl := array.get(levels, maxVolIdx + 1)
-
-// ============================================
-// SESSIONS CALCULATIONS
-// ============================================
-is_newbar(sess) =>
-    t = time(sessionRes, sess, sessionTimezone)
-    na(t[1]) and not na(t) or t[1] < t
-
-is_session(sess) =>
-    not na(time(timeframe.period, sess, sessionTimezone))
-
-londonNewbar = is_newbar(london)
-londonSession = is_session(london)
-var float londonLow = na
-var float londonHigh = na
-if londonSession
-    londonLow := londonNewbar ? low : math.min(nz(londonLow, low), low)
-    londonHigh := londonNewbar ? high : math.max(nz(londonHigh, high), high)
-
-nyNewbar = is_newbar(ny)
-nySession = is_session(ny)
-var float nyLow = na
-var float nyHigh = na
-if nySession
-    nyLow := nyNewbar ? low : math.min(nz(nyLow, low), low)
-    nyHigh := nyNewbar ? high : math.max(nz(nyHigh, high), high)
-
-tokyoNewbar = is_newbar(tokyo)
-tokyoSession = is_session(tokyo)
-var float tokyoLow = na
-var float tokyoHigh = na
-if tokyoSession
-    tokyoLow := tokyoNewbar ? low : math.min(nz(tokyoLow, low), low)
-    tokyoHigh := tokyoNewbar ? high : math.max(nz(tokyoHigh, high), high)
-
-sydneyNewbar = is_newbar(sydney)
-sydneySession = is_session(sydney)
-var float sydneyLow = na
-var float sydneyHigh = na
-if sydneySession
-    sydneyLow := sydneyNewbar ? low : math.min(nz(sydneyLow, low), low)
-    sydneyHigh := sydneyNewbar ? high : math.max(nz(sydneyHigh, high), high)
-
-// Check if in any active session
-inActiveSession = (londonSession and showLondon) or (nySession and showNY) or (tokyoSession and showTokyo) or (sydneySession and showSydney)
+    if maxVolIdx >= 0
+        pocValue := math.avg(array.get(levels, maxVolIdx), array.get(levels, maxVolIdx + 1))
 
 // ============================================
 // STRATEGY LOGIC
 // ============================================
-// POC value for strategy
-float currentPOC = math.avg(vpAlvl, vpBlvl)
-
 // Check if POC is inside VWAP bands
-pocInsideBands = not na(currentPOC) and not na(upperBandValue1) and not na(lowerBandValue1) and 
-                 currentPOC <= upperBandValue1 and currentPOC >= lowerBandValue1
+pocInsideBands = pocValue <= upperBand and pocValue >= lowerBand
 
 // Check if close is outside VWAP bands
-closeAboveUpperBand = not na(upperBandValue1) and close > upperBandValue1
-closeBelowLowerBand = not na(lowerBandValue1) and close < lowerBandValue1
-
-// Session filter
-sessionOK = useSessionFilter ? inActiveSession : true
+closeAboveUpperBand = close > upperBand
+closeBelowLowerBand = close < lowerBand
 
 // Entry conditions
-longCondition = closeBelowLowerBand and pocInsideBands and sessionOK and strategy.position_size == 0
-shortCondition = closeAboveUpperBand and pocInsideBands and sessionOK and strategy.position_size == 0
+longCondition = closeBelowLowerBand and pocInsideBands and strategy.position_size == 0
+shortCondition = closeAboveUpperBand and pocInsideBands and strategy.position_size == 0
 
 // Calculate SL and TP levels
-float longSL = na
-float longTP = na
-float shortSL = na
-float shortTP = na
-
-if longCondition
-    longSL := close - (atrValue * atrMultSL)
-    longTP := close + (atrValue * atrMultSL * riskReward)
-
-if shortCondition
-    shortSL := close + (atrValue * atrMultSL)
-    shortTP := close - (atrValue * atrMultSL * riskReward)
+slDistance = atrValue * atrMultSL
+tpDistance = slDistance * riskReward
 
 // Execute trades
 if longCondition
     strategy.entry("Long", strategy.long)
-    strategy.exit("Long Exit", "Long", stop=longSL, limit=longTP)
+    strategy.exit("Long Exit", "Long", stop=close - slDistance, limit=close + tpDistance)
 
 if shortCondition
     strategy.entry("Short", strategy.short)
-    strategy.exit("Short Exit", "Short", stop=shortSL, limit=shortTP)
+    strategy.exit("Short Exit", "Short", stop=close + slDistance, limit=close - tpDistance)
 
 // ============================================
-// PLOTS - VWAP
+// PLOTS
 // ============================================
-plot(showVWAP ? vwapValue : na, title="VWAP", color=#2962FF, offset=vwapOffset)
+plot(vwapValue, title="VWAP", color=#2962FF)
+plot(upperBand, title="Upper Band", color=color.green)
+plot(lowerBand, title="Lower Band", color=color.green)
+plot(pocValue, title="POC", color=#ff0000, linewidth=2)
 
-upperBand_1 = plot(showVWAP ? upperBandValue1 : na, title="Upper Band #1", color=color.green, offset=vwapOffset, display=showBand_1 ? display.all : display.none)
-lowerBand_1 = plot(showVWAP ? lowerBandValue1 : na, title="Lower Band #1", color=color.green, offset=vwapOffset, display=showBand_1 ? display.all : display.none)
-fill(upperBand_1, lowerBand_1, title="Bands Fill #1", color=color.new(color.green, 95), display=showBand_1 ? display.all : display.none)
-
-upperBand_2 = plot(showVWAP ? upperBandValue2 : na, title="Upper Band #2", color=color.olive, offset=vwapOffset, display=showBand_2 ? display.all : display.none)
-lowerBand_2 = plot(showVWAP ? lowerBandValue2 : na, title="Lower Band #2", color=color.olive, offset=vwapOffset, display=showBand_2 ? display.all : display.none)
-fill(upperBand_2, lowerBand_2, title="Bands Fill #2", color=color.new(color.olive, 95), display=showBand_2 ? display.all : display.none)
-
-upperBand_3 = plot(showVWAP ? upperBandValue3 : na, title="Upper Band #3", color=color.teal, offset=vwapOffset, display=showBand_3 ? display.all : display.none)
-lowerBand_3 = plot(showVWAP ? lowerBandValue3 : na, title="Lower Band #3", color=color.teal, offset=vwapOffset, display=showBand_3 ? display.all : display.none)
-fill(upperBand_3, lowerBand_3, title="Bands Fill #3", color=color.new(color.teal, 95), display=showBand_3 ? display.all : display.none)
-
-// ============================================
-// PLOTS - EMA
-// ============================================
-plot(showEMA ? usedEma : na, title="EMA", style=plot.style_line, linewidth=3, color=emaColor)
-
-// ============================================
-// PLOTS - VOLUME PROFILE (Rolling POC)
-// ============================================
-plot(show_rpoc and showVP ? currentPOC : na, 'Rolling POC', color=poc_color, linewidth=2)
-
-// ============================================
-// PLOTS - SESSIONS
-// ============================================
-plotLL = plot(showSessions and showLondon and bgColorSessions ? londonLow : na, color=color.new(#000000, 100), title="London Low")
-plotLH = plot(showSessions and showLondon and bgColorSessions ? londonHigh : na, color=color.new(#000000, 100), title="London High")
-fill(plotLL, plotLH, color=londonSession and showLondon and showSessions and bgColorSessions ? LondonColor : na, title="London Fill")
-bgcolor(londonSession and showLondon and showSessions and not bgColorSessions ? LondonColor : na, title="London Background")
-
-plotNYL = plot(showSessions and showNY and bgColorSessions ? nyLow : na, color=color.new(#000000, 100), title="NY Low")
-plotNYH = plot(showSessions and showNY and bgColorSessions ? nyHigh : na, color=color.new(#000000, 100), title="NY High")
-fill(plotNYL, plotNYH, color=nySession and showNY and showSessions and bgColorSessions ? NYColor : na, title="NY Fill")
-bgcolor(nySession and showNY and showSessions and not bgColorSessions ? NYColor : na, title="NY Background")
-
-plotTL = plot(showSessions and showTokyo and bgColorSessions ? tokyoLow : na, color=color.new(#000000, 100), title="Tokyo Low")
-plotTH = plot(showSessions and showTokyo and bgColorSessions ? tokyoHigh : na, color=color.new(#000000, 100), title="Tokyo High")
-fill(plotTL, plotTH, color=tokyoSession and showTokyo and showSessions and bgColorSessions ? AsiaColor : na, title="Tokyo Fill")
-bgcolor(tokyoSession and showTokyo and showSessions and not bgColorSessions ? AsiaColor : na, title="Tokyo Background")
-
-plotSL = plot(showSessions and showSydney and bgColorSessions ? sydneyLow : na, color=color.new(#000000, 100), title="Sydney Low")
-plotSH = plot(showSessions and showSydney and bgColorSessions ? sydneyHigh : na, color=color.new(#000000, 100), title="Sydney High")
-fill(plotSL, plotSH, color=sydneySession and showSydney and showSessions and bgColorSessions ? SydneyColor : na, title="Sydney Fill")
-bgcolor(sydneySession and showSydney and showSessions and not bgColorSessions ? SydneyColor : na, title="Sydney Background")
-
-// ============================================
-// PLOTS - ENTRY SIGNALS
-// ============================================
-plotshape(longCondition, title="Long Signal", location=location.belowbar, color=color.lime, style=shape.triangleup, size=size.small)
-plotshape(shortCondition, title="Short Signal", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small)
+// Entry Signals
+plotshape(longCondition, title="Long", location=location.belowbar, color=color.lime, style=shape.triangleup, size=size.small)
+plotshape(shortCondition, title="Short", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small)
 
 // ============================================
 // ALERTS
 // ============================================
-alertcondition(longCondition, title="Long Entry", message="VWAP Strategy: Long Entry Signal")
-alertcondition(shortCondition, title="Short Entry", message="VWAP Strategy: Short Entry Signal")
+alertcondition(longCondition, title="Long Entry", message="VWAP Strategy: Long Entry")
+alertcondition(shortCondition, title="Short Entry", message="VWAP Strategy: Short Entry")
