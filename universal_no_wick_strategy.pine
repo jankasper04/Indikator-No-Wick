@@ -242,27 +242,34 @@ bool bear60 = o60 == h60 and c60 < o60
 bool bull240 = o240 == l240 and c240 > o240
 bool bear240 = o240 == h240 and c240 < o240
 
-// Count no-wick candles over lookback period
+// Custom sum function that works with dynamic lookback
+f_sum(src, len) =>
+    float sum = 0.0
+    for i = 0 to len - 1
+        sum += nz(src[i], 0)
+    sum
+
+// Count no-wick candles over lookback period using custom function
 // Current timeframe
-float countBullCurrent = math.sum(bullishNoBottomWick ? 1.0 : 0.0, statsLookback)
-float countBearCurrent = math.sum(bearishNoTopWick ? 1.0 : 0.0, statsLookback)
+float countBullCurrent = f_sum(bullishNoBottomWick ? 1.0 : 0.0, statsLookback)
+float countBearCurrent = f_sum(bearishNoTopWick ? 1.0 : 0.0, statsLookback)
 float countTotalCurrent = countBullCurrent + countBearCurrent
 
 // M15
-float countBull15 = math.sum(bull15 ? 1.0 : 0.0, statsLookback)
-float countBear15 = math.sum(bear15 ? 1.0 : 0.0, statsLookback)
+float countBull15 = f_sum(bull15 ? 1.0 : 0.0, statsLookback)
+float countBear15 = f_sum(bear15 ? 1.0 : 0.0, statsLookback)
 
 // M30
-float countBull30 = math.sum(bull30 ? 1.0 : 0.0, statsLookback)
-float countBear30 = math.sum(bear30 ? 1.0 : 0.0, statsLookback)
+float countBull30 = f_sum(bull30 ? 1.0 : 0.0, statsLookback)
+float countBear30 = f_sum(bear30 ? 1.0 : 0.0, statsLookback)
 
 // H1
-float countBull60 = math.sum(bull60 ? 1.0 : 0.0, statsLookback)
-float countBear60 = math.sum(bear60 ? 1.0 : 0.0, statsLookback)
+float countBull60 = f_sum(bull60 ? 1.0 : 0.0, statsLookback)
+float countBear60 = f_sum(bear60 ? 1.0 : 0.0, statsLookback)
 
 // H4
-float countBull240 = math.sum(bull240 ? 1.0 : 0.0, statsLookback)
-float countBear240 = math.sum(bear240 ? 1.0 : 0.0, statsLookback)
+float countBull240 = f_sum(bull240 ? 1.0 : 0.0, statsLookback)
+float countBear240 = f_sum(bear240 ? 1.0 : 0.0, statsLookback)
 
 // Calculate percentages
 float pctCurrent = statsLookback > 0 ? (countTotalCurrent / statsLookback) * 100 : 0.0
