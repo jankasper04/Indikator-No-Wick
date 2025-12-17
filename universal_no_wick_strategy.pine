@@ -19,6 +19,15 @@ nwSettings = "No Wick Candle Settings"
 show_compensation = input.bool(true, "Show Compensation Lines", group=nwSettings)
 show_compensation_label = input.bool(true, "Show Compensation Label", group=nwSettings)
 compensationBars = input.int(20, "Compensation Line Length (bars)", group=nwSettings, minval=1)
+colorNoWickCandles = input.bool(true, "Color No-Wick Candles", group=nwSettings)
+bullishNoWickColor = input.color(color.lime, "Bullish No-Wick Color", group=nwSettings)
+bearishNoWickColor = input.color(color.fuchsia, "Bearish No-Wick Color", group=nwSettings)
+
+// ==================== HTF MARKER INPUTS ====================
+htfSettings = "HTF Marker Settings"
+show_htf_marker = input.bool(true, "Show HTF Start Marker", group=htfSettings)
+show_30m_marker = input.bool(true, "Mark 30min Candle Start", group=htfSettings)
+show_1h_marker = input.bool(true, "Mark 1h Candle Start", group=htfSettings)
 
 // ==================== TRADE INPUTS ====================
 tradeSettings = "Trade Settings"
@@ -96,9 +105,8 @@ isLowerHigh = h0 < h1
 isLowerLow = l0 < l1
 
 // ==================== MARKET STRUCTURE STATE ====================
-var int marketStructure = 0  // -1 = Bearish, 0 = Neutral, 1 = Bullish
+var int marketStructure = 0
 
-// Initialize structure based on swing points
 if marketStructure == 0
     if isHigherHigh and isHigherLow
         marketStructure := 1
@@ -111,20 +119,17 @@ var int lastChochBar = na
 var float lastBosLevel = na
 var int lastBosBar = na
 
-// Track if we already triggered ChoCH/BOS for current swing
 var bool chochBullishDone = false
 var bool chochBearishDone = false
 var bool bosBullishDone = false
 var bool bosBearishDone = false
 
-// Current bar events
 chochBullish = false
 chochBearish = false
 bosBullish = false
 bosBearish = false
 
-// ==================== ChoCH DETECTION ====================
-// Bullish ChoCH: Close above LH (Lower High) → Shift to Bullish
+// ChoCH Detection
 if close > h0 and isLowerHigh and not chochBullishDone
     chochBullish := true
     chochBullishDone := true
@@ -135,7 +140,6 @@ if close > h0 and isLowerHigh and not chochBullishDone
     lastChochBar := h0i
     marketStructure := 1
 
-// Bearish ChoCH: Close below HL (Higher Low) → Shift to Bearish
 if close < l0 and isHigherLow and not chochBearishDone
     chochBearish := true
     chochBearishDone := true
@@ -146,22 +150,19 @@ if close < l0 and isHigherLow and not chochBearishDone
     lastChochBar := l0i
     marketStructure := -1
 
-// ==================== BOS DETECTION ====================
-// BOS Bullish: Close above HH (Higher High) in Bullish structure → Continuation
+// BOS Detection
 if close > h0 and isHigherHigh and marketStructure == 1 and not bosBullishDone and not chochBullish
     bosBullish := true
     bosBullishDone := true
     lastBosLevel := h0
     lastBosBar := h0i
 
-// BOS Bearish: Close below LL (Lower Low) in Bearish structure → Continuation
 if close < l0 and isLowerLow and marketStructure == -1 and not bosBearishDone and not chochBearish
     bosBearish := true
     bosBearishDone := true
     lastBosLevel := l0
     lastBosBar := l0i
 
-// Reset triggers when new swing points form
 if ta.change(zigzagTrend) != 0
     chochBullishDone := false
     chochBearishDone := false
@@ -208,9 +209,23 @@ if bosBearish and show_bos and trendMethod == "Market Structure"
 bullishNoBottomWick = open == low and close > open
 bearishNoTopWick = open == high and close < open
 
-// STRICT: Only valid signals in correct structure
 isBullishNoWick = bullishNoBottomWick and marketStructure == 1
 isBearishNoWick = bearishNoTopWick and marketStructure == -1
+
+// ==================== HTF START DETECTION ====================
+// Check if current bar is the start of a 30min or 1h candle
+is30mStart = ta.change(time("30")) != 0
+is1hStart = ta.change(time("60")) != 0
+
+isHTFStart = (show_30m_marker and is30mStart) or (show_1h_marker and is1hStart)
+
+// No-Wick at HTF start
+bullishNoWickHTF = bullishNoBottomWick and isHTFStart
+bearishNoWickHTF = bearishNoTopWick and isHTFStart
+
+// ==================== COLOR NO-WICK CANDLES ====================
+noWickColor = bullishNoBottomWick ? bullishNoWickColor : bearishNoTopWick ? bearishNoWickColor : na
+barcolor(colorNoWickCandles and (bullishNoBottomWick or bearishNoTopWick) ? noWickColor : na)
 
 // ==================== COMPENSATION LINES ====================
 if (bullishNoBottomWick or bearishNoTopWick) and show_compensation
@@ -388,36 +403,44 @@ plot(inLong or inShort ? activeSL : na, "Stop Loss", color=color.red, style=plot
 plot(inLong or inShort ? activeTP : na, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
 plot(inLong or inShort ? strategy.position_avg_price : na, "Entry", color=color.blue, style=plot.style_linebr, linewidth=1)
 
-// All No-Wick candles
+// No-Wick Signals
 plotshape(bullishNoBottomWick, "Bullish No Wick", shape.triangleup, location.belowbar, color.green, size=size.small)
 plotshape(bearishNoTopWick, "Bearish No Wick", shape.triangledown, location.abovebar, color.red, size=size.small)
 
-// Valid signals only
+// HTF Start Markers (Diamond above/below the triangle)
+plotshape(bullishNoWickHTF and show_htf_marker, "Bullish HTF", shape.diamond, location.belowbar, color.yellow, size=size.tiny, offset=0)
+plotshape(bearishNoWickHTF and show_htf_marker, "Bearish HTF", shape.diamond, location.abovebar, color.yellow, size=size.tiny, offset=0)
+
+// Valid signals
 plotshape(isBullishNoWick and canGoLong, "Valid Long", shape.circle, location.belowbar, color.lime, size=size.tiny)
 plotshape(isBearishNoWick and canGoShort, "Valid Short", shape.circle, location.abovebar, color.fuchsia, size=size.tiny)
 
 // ==================== INFO TABLE ====================
-var table infoTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80))
+var table infoTable = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80))
 if barstate.islast
     table.cell(infoTable, 0, 0, "Structure", text_color=color.white)
     table.cell(infoTable, 1, 0, marketStructure == 1 ? "BULLISH ↑" : marketStructure == -1 ? "BEARISH ↓" : "NEUTRAL", text_color=marketStructure == 1 ? color.green : marketStructure == -1 ? color.red : color.gray)
     table.cell(infoTable, 0, 1, "Trade", text_color=color.white)
     table.cell(infoTable, 1, 1, marketStructure == 1 ? "LONG ONLY" : marketStructure == -1 ? "SHORT ONLY" : "NONE", text_color=marketStructure == 1 ? color.green : marketStructure == -1 ? color.red : color.gray)
-    table.cell(infoTable, 0, 2, "Last High", text_color=color.white)
-    table.cell(infoTable, 1, 2, (isHigherHigh ? "HH " : "LH ") + str.tostring(h0, "#.##"), text_color=isHigherHigh ? color.green : color.red)
-    table.cell(infoTable, 0, 3, "Last Low", text_color=color.white)
-    table.cell(infoTable, 1, 3, (isHigherLow ? "HL " : "LL ") + str.tostring(l0, "#.##"), text_color=isHigherLow ? color.green : color.red)
-    table.cell(infoTable, 0, 4, "Position", text_color=color.white)
-    table.cell(infoTable, 1, 4, inLong ? "LONG" : inShort ? "SHORT" : "FLAT", text_color=inLong ? color.green : inShort ? color.red : color.gray)
-    table.cell(infoTable, 0, 5, "Pending", text_color=color.white)
-    table.cell(infoTable, 1, 5, longPending ? "LONG" : shortPending ? "SHORT" : "-", text_color=longPending ? color.green : shortPending ? color.red : color.gray)
-    table.cell(infoTable, 0, 6, "SL", text_color=color.white)
-    table.cell(infoTable, 1, 6, not na(activeSL) ? str.tostring(activeSL, "#.##") : "-", text_color=color.red)
-    table.cell(infoTable, 0, 7, "TP", text_color=color.white)
-    table.cell(infoTable, 1, 7, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
+    table.cell(infoTable, 0, 2, "HTF Start", text_color=color.white)
+    table.cell(infoTable, 1, 2, is1hStart ? "1H ◆" : is30mStart ? "30M ◆" : "-", text_color=color.yellow)
+    table.cell(infoTable, 0, 3, "Last High", text_color=color.white)
+    table.cell(infoTable, 1, 3, (isHigherHigh ? "HH " : "LH ") + str.tostring(h0, "#.##"), text_color=isHigherHigh ? color.green : color.red)
+    table.cell(infoTable, 0, 4, "Last Low", text_color=color.white)
+    table.cell(infoTable, 1, 4, (isHigherLow ? "HL " : "LL ") + str.tostring(l0, "#.##"), text_color=isHigherLow ? color.green : color.red)
+    table.cell(infoTable, 0, 5, "Position", text_color=color.white)
+    table.cell(infoTable, 1, 5, inLong ? "LONG" : inShort ? "SHORT" : "FLAT", text_color=inLong ? color.green : inShort ? color.red : color.gray)
+    table.cell(infoTable, 0, 6, "Pending", text_color=color.white)
+    table.cell(infoTable, 1, 6, longPending ? "LONG" : shortPending ? "SHORT" : "-", text_color=longPending ? color.green : shortPending ? color.red : color.gray)
+    table.cell(infoTable, 0, 7, "SL", text_color=color.white)
+    table.cell(infoTable, 1, 7, not na(activeSL) ? str.tostring(activeSL, "#.##") : "-", text_color=color.red)
+    table.cell(infoTable, 0, 8, "TP", text_color=color.white)
+    table.cell(infoTable, 1, 8, not na(activeTP) ? str.tostring(activeTP, "#.##") : "-", text_color=color.green)
 
 // ==================== ALERTS ====================
 alertcondition(chochBullish, "Bullish ChoCH", "ChoCH Bullish - LONG ONLY!")
 alertcondition(chochBearish, "Bearish ChoCH", "ChoCH Bearish - SHORT ONLY!")
 alertcondition(bosBullish, "Bullish BOS", "BOS Bullish!")
 alertcondition(bosBearish, "Bearish BOS", "BOS Bearish!")
+alertcondition(bullishNoWickHTF, "Bullish No-Wick HTF", "Bullish No-Wick at HTF Start!")
+alertcondition(bearishNoWickHTF, "Bearish No-Wick HTF", "Bearish No-Wick at HTF Start!")
