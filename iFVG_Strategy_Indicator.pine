@@ -1,0 +1,410 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © iFVG Strategy Indicator
+
+//@version=5
+indicator("iFVG Multi-Timeframe Strategy", shorttitle="iFVG MTF", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ INPUTS ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+// === Timeframe Settings ===
+grp_tf = "📊 Timeframe Settings"
+tf_liquidity = input.timeframe("60", "Liquidity Sweep TF", group=grp_tf, tooltip="H1 oder M15 für Liquidity Sweep Detection")
+tf_htf_fvg = input.timeframe("15", "HTF FVG Timeframe", group=grp_tf, tooltip="M5, M15 oder H1 für Higher TF FVG")
+tf_entry = input.timeframe("1", "Entry TF (iFVG)", group=grp_tf, tooltip="M1 für Inversion FVG und CISD")
+
+// === Detection Settings ===
+grp_detect = "🔍 Detection Settings"
+swing_length = input.int(5, "Swing Length", minval=2, maxval=20, group=grp_detect)
+min_fvg_size = input.float(5.0, "Min FVG Size (Points)", minval=0.1, group=grp_detect)
+ifvg_lookback = input.int(50, "iFVG Lookback", minval=10, maxval=200, group=grp_detect)
+liquidity_lookback = input.int(20, "Liquidity Lookback", minval=5, maxval=100, group=grp_detect)
+
+// === Visual Settings ===
+grp_visual = "🎨 Visual Settings"
+col_bull_ifvg = input.color(color.new(color.green, 70), "Bullish iFVG", group=grp_visual)
+col_bear_ifvg = input.color(color.new(color.red, 70), "Bearish iFVG", group=grp_visual)
+col_bull_fvg = input.color(color.new(color.teal, 80), "Bullish HTF FVG", group=grp_visual)
+col_bear_fvg = input.color(color.new(color.maroon, 80), "Bearish HTF FVG", group=grp_visual)
+col_bsl = input.color(color.new(color.lime, 50), "Buy-Side Liquidity", group=grp_visual)
+col_ssl = input.color(color.new(color.red, 50), "Sell-Side Liquidity", group=grp_visual)
+col_sweep = input.color(color.yellow, "Liquidity Sweep", group=grp_visual)
+show_htf_fvg = input.bool(true, "Show HTF FVG Zones", group=grp_visual)
+show_liquidity = input.bool(true, "Show Liquidity Levels", group=grp_visual)
+show_ifvg = input.bool(true, "Show iFVG Zones", group=grp_visual)
+show_cisd = input.bool(true, "Show CISD Signals", group=grp_visual)
+show_labels = input.bool(true, "Show Labels", group=grp_visual)
+show_entry_signals = input.bool(true, "Show Entry Signals", group=grp_visual)
+
+// === Alert Settings ===
+grp_alert = "🔔 Alert Settings"
+alert_sweep = input.bool(true, "Alert on Liquidity Sweep", group=grp_alert)
+alert_htf_fvg = input.bool(true, "Alert on HTF FVG", group=grp_alert)
+alert_ifvg = input.bool(true, "Alert on iFVG Signal", group=grp_alert)
+alert_full_setup = input.bool(true, "Alert on Full Setup", group=grp_alert)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ FUNCTIONS ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+// --- Swing High/Low Detection ---
+swing_high(len) =>
+    ta.pivothigh(high, len, len)
+
+swing_low(len) =>
+    ta.pivotlow(low, len, len)
+
+// --- Fair Value Gap Detection ---
+is_bull_fvg(idx) =>
+    low[idx] > high[idx + 2]
+
+is_bear_fvg(idx) =>
+    high[idx] < low[idx + 2]
+
+get_fvg_size(idx, is_bull) =>
+    if is_bull
+        low[idx] - high[idx + 2]
+    else
+        low[idx + 2] - high[idx]
+
+// --- Inversion FVG Detection ---
+// Bullish iFVG: Originally bearish FVG that gets inverted (price closes above)
+// Bearish iFVG: Originally bullish FVG that gets inverted (price closes below)
+
+// --- CISD Detection (Change in State of Delivery) ---
+is_cisd_bullish() =>
+    // Strong bullish candle after downward delivery
+    body = close - open
+    range_size = high - low
+    body_ratio = body / range_size
+    prev_bearish = close[1] < open[1] and close[2] < open[2]
+    body > 0 and body_ratio > 0.6 and prev_bearish
+
+is_cisd_bearish() =>
+    // Strong bearish candle after upward delivery
+    body = open - close
+    range_size = high - low
+    body_ratio = body / range_size
+    prev_bullish = close[1] > open[1] and close[2] > open[2]
+    body > 0 and body_ratio > 0.6 and prev_bullish
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ HTF DATA REQUEST ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+// --- Liquidity TF Data ---
+[liq_high, liq_low, liq_close] = request.security(syminfo.tickerid, tf_liquidity, [high, low, close])
+
+// --- HTF FVG Data ---
+[htf_high, htf_low, htf_high2, htf_low2, htf_open, htf_close] = request.security(syminfo.tickerid, tf_htf_fvg, [high, low, high[2], low[2], open, close])
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ LIQUIDITY DETECTION ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Store swing highs and lows for liquidity
+var float[] bsl_levels = array.new_float()
+var float[] ssl_levels = array.new_float()
+var int[] bsl_bars = array.new_int()
+var int[] ssl_bars = array.new_int()
+
+// Detect swing points
+sh = swing_high(swing_length)
+sl = swing_low(swing_length)
+
+// Add new swing highs (Buy-Side Liquidity)
+if not na(sh)
+    array.push(bsl_levels, sh)
+    array.push(bsl_bars, bar_index - swing_length)
+    // Keep array size manageable
+    if array.size(bsl_levels) > liquidity_lookback
+        array.shift(bsl_levels)
+        array.shift(bsl_bars)
+
+// Add new swing lows (Sell-Side Liquidity)  
+if not na(sl)
+    array.push(ssl_levels, sl)
+    array.push(ssl_bars, bar_index - swing_length)
+    if array.size(ssl_levels) > liquidity_lookback
+        array.shift(ssl_levels)
+        array.shift(ssl_bars)
+
+// --- Liquidity Sweep Detection ---
+var bool bsl_swept = false
+var bool ssl_swept = false
+var float swept_level = na
+
+// Check for BSL sweep (price goes above swing high then closes below)
+bsl_sweep = false
+if array.size(bsl_levels) > 0
+    for i = 0 to array.size(bsl_levels) - 1
+        level = array.get(bsl_levels, i)
+        if high > level and close < level
+            bsl_sweep := true
+            swept_level := level
+            break
+
+// Check for SSL sweep (price goes below swing low then closes above)
+ssl_sweep = false
+if array.size(ssl_levels) > 0
+    for i = 0 to array.size(ssl_levels) - 1
+        level = array.get(ssl_levels, i)
+        if low < level and close > level
+            ssl_sweep := true
+            swept_level := level
+            break
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ FVG DETECTION ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+// --- Current TF FVG (for iFVG) ---
+bull_fvg = is_bull_fvg(0)
+bear_fvg = is_bear_fvg(0)
+
+bull_fvg_top = bull_fvg ? low : na
+bull_fvg_bottom = bull_fvg ? high[2] : na
+bear_fvg_top = bear_fvg ? low[2] : na
+bear_fvg_bottom = bear_fvg ? high : na
+
+// Store FVGs for inversion detection
+var box[] fvg_boxes = array.new_box()
+var bool[] fvg_is_bull = array.new_bool()
+var float[] fvg_tops = array.new_float()
+var float[] fvg_bottoms = array.new_float()
+var int[] fvg_start_bars = array.new_int()
+
+// Add new FVGs
+fvg_min_points = min_fvg_size * syminfo.mintick
+
+if bull_fvg and (bull_fvg_top - bull_fvg_bottom) >= fvg_min_points
+    array.push(fvg_is_bull, true)
+    array.push(fvg_tops, bull_fvg_top)
+    array.push(fvg_bottoms, bull_fvg_bottom)
+    array.push(fvg_start_bars, bar_index - 2)
+    
+if bear_fvg and (bear_fvg_top - bear_fvg_bottom) >= fvg_min_points
+    array.push(fvg_is_bull, false)
+    array.push(fvg_tops, bear_fvg_top)
+    array.push(fvg_bottoms, bear_fvg_bottom)
+    array.push(fvg_start_bars, bar_index - 2)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ INVERSION FVG DETECTION ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+var bool ifvg_bull_signal = false
+var bool ifvg_bear_signal = false
+var float ifvg_entry_level = na
+var float ifvg_sl_level = na
+var float ifvg_tp_level = na
+
+// Check for FVG inversions
+if array.size(fvg_is_bull) > 0
+    for i = array.size(fvg_is_bull) - 1 to 0
+        if i >= array.size(fvg_is_bull)
+            continue
+            
+        is_bull = array.get(fvg_is_bull, i)
+        fvg_top = array.get(fvg_tops, i)
+        fvg_bottom = array.get(fvg_bottoms, i)
+        start_bar = array.get(fvg_start_bars, i)
+        
+        // Check age - remove old FVGs
+        if bar_index - start_bar > ifvg_lookback
+            array.remove(fvg_is_bull, i)
+            array.remove(fvg_tops, i)
+            array.remove(fvg_bottoms, i)
+            array.remove(fvg_start_bars, i)
+            continue
+        
+        // Bullish iFVG: Originally bearish FVG, price now closes above it
+        if not is_bull and close > fvg_top and close[1] <= fvg_top
+            ifvg_bull_signal := true
+            ifvg_entry_level := fvg_top  // Entry at top of inverted FVG
+            ifvg_sl_level := fvg_bottom  // SL below the zone
+            // Remove the inverted FVG
+            array.remove(fvg_is_bull, i)
+            array.remove(fvg_tops, i)
+            array.remove(fvg_bottoms, i)
+            array.remove(fvg_start_bars, i)
+            break
+            
+        // Bearish iFVG: Originally bullish FVG, price now closes below it
+        if is_bull and close < fvg_bottom and close[1] >= fvg_bottom
+            ifvg_bear_signal := true
+            ifvg_entry_level := fvg_bottom  // Entry at bottom of inverted FVG
+            ifvg_sl_level := fvg_top  // SL above the zone
+            array.remove(fvg_is_bull, i)
+            array.remove(fvg_tops, i)
+            array.remove(fvg_bottoms, i)
+            array.remove(fvg_start_bars, i)
+            break
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ CISD DETECTION ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+cisd_bull = is_cisd_bullish()
+cisd_bear = is_cisd_bearish()
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ FULL SETUP DETECTION ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Track recent events
+var bool recent_ssl_sweep = false
+var bool recent_bsl_sweep = false
+var bool recent_htf_bull_fvg = false
+var bool recent_htf_bear_fvg = false
+var int sweep_bar = 0
+var int htf_fvg_bar = 0
+
+// Update sweep tracking
+if ssl_sweep
+    recent_ssl_sweep := true
+    sweep_bar := bar_index
+    
+if bsl_sweep
+    recent_bsl_sweep := true
+    sweep_bar := bar_index
+
+// Decay old signals (valid for 50 bars)
+if bar_index - sweep_bar > 50
+    recent_ssl_sweep := false
+    recent_bsl_sweep := false
+
+// HTF FVG tracking  
+htf_bull_fvg = htf_low > htf_high2
+htf_bear_fvg = htf_high < htf_low2
+
+if htf_bull_fvg
+    recent_htf_bull_fvg := true
+    htf_fvg_bar := bar_index
+    
+if htf_bear_fvg
+    recent_htf_bear_fvg := true
+    htf_fvg_bar := bar_index
+
+if bar_index - htf_fvg_bar > 50
+    recent_htf_bull_fvg := false
+    recent_htf_bear_fvg := false
+
+// FULL SETUP CONDITIONS
+// Long: SSL Sweep → HTF Bull FVG → iFVG Bull → CISD Bull
+full_long_setup = recent_ssl_sweep and recent_htf_bull_fvg and ifvg_bull_signal and cisd_bull
+
+// Short: BSL Sweep → HTF Bear FVG → iFVG Bear → CISD Bear  
+full_short_setup = recent_bsl_sweep and recent_htf_bear_fvg and ifvg_bear_signal and cisd_bear
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ PLOTTING ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+// --- Plot Liquidity Levels ---
+if show_liquidity
+    // Draw BSL lines
+    if array.size(bsl_levels) > 0
+        for i = 0 to math.min(5, array.size(bsl_levels) - 1)
+            level = array.get(bsl_levels, array.size(bsl_levels) - 1 - i)
+            line.new(bar_index - 20, level, bar_index, level, color=col_bsl, style=line.style_dashed, width=1)
+    
+    // Draw SSL lines
+    if array.size(ssl_levels) > 0
+        for i = 0 to math.min(5, array.size(ssl_levels) - 1)
+            level = array.get(ssl_levels, array.size(ssl_levels) - 1 - i)
+            line.new(bar_index - 20, level, bar_index, level, color=col_ssl, style=line.style_dashed, width=1)
+
+// --- Plot Liquidity Sweep ---
+plotshape(ssl_sweep and show_labels, title="SSL Sweep", location=location.belowbar, style=shape.triangleup, size=size.small, color=col_sweep, text="SSL\nSWEEP")
+plotshape(bsl_sweep and show_labels, title="BSL Sweep", location=location.abovebar, style=shape.triangledown, size=size.small, color=col_sweep, text="BSL\nSWEEP")
+
+// --- Plot HTF FVG Zones ---
+if show_htf_fvg
+    if htf_bull_fvg
+        box.new(bar_index - 3, htf_low, bar_index, htf_high2, bgcolor=col_bull_fvg, border_color=color.teal, border_width=1)
+        if show_labels
+            label.new(bar_index, htf_low, "HTF\nFVG", style=label.style_label_up, color=color.teal, textcolor=color.white, size=size.tiny)
+    
+    if htf_bear_fvg
+        box.new(bar_index - 3, htf_low2, bar_index, htf_high, bgcolor=col_bear_fvg, border_color=color.maroon, border_width=1)
+        if show_labels
+            label.new(bar_index, htf_high, "HTF\nFVG", style=label.style_label_down, color=color.maroon, textcolor=color.white, size=size.tiny)
+
+// --- Plot iFVG Signals ---
+if show_ifvg
+    if ifvg_bull_signal
+        box.new(bar_index - 2, ifvg_sl_level, bar_index + 5, ifvg_entry_level, bgcolor=col_bull_ifvg, border_color=color.green, border_width=2)
+        if show_labels
+            label.new(bar_index, ifvg_entry_level, "iFVG\nBULL", style=label.style_label_down, color=color.green, textcolor=color.white, size=size.small)
+    
+    if ifvg_bear_signal
+        box.new(bar_index - 2, ifvg_entry_level, bar_index + 5, ifvg_sl_level, bgcolor=col_bear_ifvg, border_color=color.red, border_width=2)
+        if show_labels
+            label.new(bar_index, ifvg_entry_level, "iFVG\nBEAR", style=label.style_label_up, color=color.red, textcolor=color.white, size=size.small)
+
+// --- Plot CISD ---
+if show_cisd
+    plotshape(cisd_bull, title="CISD Bull", location=location.belowbar, style=shape.diamond, size=size.tiny, color=color.lime, text="CISD")
+    plotshape(cisd_bear, title="CISD Bear", location=location.abovebar, style=shape.diamond, size=size.tiny, color=color.fuchsia, text="CISD")
+
+// --- Plot Full Setup Entry Signals ---
+if show_entry_signals
+    plotshape(full_long_setup, title="LONG Setup", location=location.belowbar, style=shape.labelup, size=size.large, color=color.green, text="🎯 LONG", textcolor=color.white)
+    plotshape(full_short_setup, title="SHORT Setup", location=location.abovebar, style=shape.labeldown, size=size.large, color=color.red, text="🎯 SHORT", textcolor=color.white)
+
+// --- Background Color for Active Setups ---
+bgcolor(full_long_setup ? color.new(color.green, 90) : na, title="Long Setup BG")
+bgcolor(full_short_setup ? color.new(color.red, 90) : na, title="Short Setup BG")
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ ALERTS ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Individual Alerts
+alertcondition(ssl_sweep, title="SSL Sweep", message="🔔 Sell-Side Liquidity Sweep detected on {{ticker}}")
+alertcondition(bsl_sweep, title="BSL Sweep", message="🔔 Buy-Side Liquidity Sweep detected on {{ticker}}")
+alertcondition(htf_bull_fvg, title="HTF Bull FVG", message="🟢 Bullish HTF Fair Value Gap formed on {{ticker}}")
+alertcondition(htf_bear_fvg, title="HTF Bear FVG", message="🔴 Bearish HTF Fair Value Gap formed on {{ticker}}")
+alertcondition(ifvg_bull_signal, title="Bullish iFVG", message="🟢 Bullish Inversion FVG Signal on {{ticker}}")
+alertcondition(ifvg_bear_signal, title="Bearish iFVG", message="🔴 Bearish Inversion FVG Signal on {{ticker}}")
+alertcondition(cisd_bull, title="CISD Bullish", message="🟢 Bullish CISD confirmed on {{ticker}}")
+alertcondition(cisd_bear, title="CISD Bearish", message="🔴 Bearish CISD confirmed on {{ticker}}")
+
+// Full Setup Alerts
+alertcondition(full_long_setup, title="🎯 FULL LONG SETUP", message="🚀 FULL LONG SETUP on {{ticker}}!\n1. SSL Sweep ✓\n2. HTF Bull FVG ✓\n3. Bullish iFVG ✓\n4. CISD Bull ✓\n→ Entry to BSL!")
+alertcondition(full_short_setup, title="🎯 FULL SHORT SETUP", message="📉 FULL SHORT SETUP on {{ticker}}!\n1. BSL Sweep ✓\n2. HTF Bear FVG ✓\n3. Bearish iFVG ✓\n4. CISD Bear ✓\n→ Entry to SSL!")
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ███ INFO TABLE ███
+// ══════════════════════════════════════════════════════════════════════════════
+
+var table info_table = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast
+    table.cell(info_table, 0, 0, "iFVG Strategy", text_color=color.white, text_size=size.normal)
+    table.cell(info_table, 1, 0, "Status", text_color=color.white, text_size=size.normal)
+    
+    table.cell(info_table, 0, 1, "SSL Sweep", text_color=color.gray, text_size=size.small)
+    table.cell(info_table, 1, 1, recent_ssl_sweep ? "✓" : "—", text_color=recent_ssl_sweep ? color.green : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 2, "BSL Sweep", text_color=color.gray, text_size=size.small)
+    table.cell(info_table, 1, 2, recent_bsl_sweep ? "✓" : "—", text_color=recent_bsl_sweep ? color.red : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 3, "HTF Bull FVG", text_color=color.gray, text_size=size.small)
+    table.cell(info_table, 1, 3, recent_htf_bull_fvg ? "✓" : "—", text_color=recent_htf_bull_fvg ? color.green : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 4, "HTF Bear FVG", text_color=color.gray, text_size=size.small)
+    table.cell(info_table, 1, 4, recent_htf_bear_fvg ? "✓" : "—", text_color=recent_htf_bear_fvg ? color.red : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 5, "CISD Bull", text_color=color.gray, text_size=size.small)
+    table.cell(info_table, 1, 5, cisd_bull ? "✓" : "—", text_color=cisd_bull ? color.green : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 6, "CISD Bear", text_color=color.gray, text_size=size.small)
+    table.cell(info_table, 1, 6, cisd_bear ? "✓" : "—", text_color=cisd_bear ? color.red : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 7, "SETUP", text_color=color.white, text_size=size.normal)
+    setup_text = full_long_setup ? "🎯 LONG" : full_short_setup ? "🎯 SHORT" : "—"
+    setup_color = full_long_setup ? color.green : full_short_setup ? color.red : color.gray
+    table.cell(info_table, 1, 7, setup_text, text_color=setup_color, text_size=size.normal)
