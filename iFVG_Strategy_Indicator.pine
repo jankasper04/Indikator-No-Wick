@@ -9,16 +9,20 @@ indicator("iFVG Multi-Timeframe Strategy", shorttitle = "iFVG MTF Strategy", ove
 //---------------------------------------------------------------------------------------------------------------------{
 
 //Timeframe Settings
+tf_liq      = input.timeframe("60", title = "Liquidity TF", group = "Timeframe Settings", tooltip = "H1 or M15 for Liquidity Levels", options = ["15", "60"])
 tf_htf      = input.timeframe("15", title = "HTF FVG Timeframe", group = "Timeframe Settings", tooltip = "M5, M15 or H1 for Higher TF FVG")
 
 //Detection Settings
-swingLen    = input.int(5, title = "Swing Length", minval = 2, maxval = 20, group = "Detection Settings")
+swingLen    = input.int(5, title = "Swing Length", minval = 2, maxval = 20, group = "Detection Settings", tooltip = "Number of bars for swing detection")
 minFvgSize  = input.float(5.0, title = "Min FVG Size (Points)", minval = 0.1, group = "Detection Settings")
 ifvgLookback = input.int(50, title = "iFVG Lookback", minval = 10, maxval = 200, group = "Detection Settings")
-liqLookback = input.int(20, title = "Liquidity Lookback", minval = 5, maxval = 100, group = "Detection Settings")
+maxLiqLevels = input.int(10, title = "Max Liquidity Levels", minval = 1, maxval = 20, group = "Detection Settings")
 
 //Display Settings
-showLiq     = input.bool(true, title = "Show Liquidity Levels", group = "Display Settings")
+showBsl     = input.bool(true, title = "Show BSL Levels", group = "Display Settings", inline = "BSL")
+bslStyle    = input.string("───", title = "", options = ["───", "- - -", "· · ·"], group = "Display Settings", inline = "BSL")
+showSsl     = input.bool(true, title = "Show SSL Levels", group = "Display Settings", inline = "SSL")
+sslStyle    = input.string("───", title = "", options = ["───", "- - -", "· · ·"], group = "Display Settings", inline = "SSL")
 showHtfFvg  = input.bool(true, title = "Show HTF FVG Zones", group = "Display Settings")
 showIfvg    = input.bool(true, title = "Show iFVG Zones", group = "Display Settings")
 showCisd    = input.bool(true, title = "Show CISD Signals", group = "Display Settings")
@@ -28,13 +32,14 @@ showTable   = input.bool(true, title = "Show Info Table", group = "Display Setti
 extendFvg   = input.int(20, title = "Extend FVG Boxes (bars)", minval = 5, maxval = 100, group = "Display Settings")
 
 //Style
-bullColor   = input.color(color.new(#089981,60), title = "Bull Color", group = "Style", inline = "Bull")
-bullFill    = input.color(color.new(#089981,80), title = "Bull Fill", group = "Style", inline = "Bull")
-bearColor   = input.color(color.new(#f23645,60), title = "Bear Color", group = "Style", inline = "Bear")
-bearFill    = input.color(color.new(#f23645,80), title = "Bear Fill", group = "Style", inline = "Bear")
-bslColor    = input.color(color.new(#089981,50), title = "BSL Color", group = "Style", inline = "Liq")
-sslColor    = input.color(color.new(#f23645,50), title = "SSL Color", group = "Style", inline = "Liq")
+bullColor   = input.color(#089981, title = "Bull Color", group = "Style", inline = "Bull")
+bullFill    = input.color(color.new(#089981,80), title = "Fill", group = "Style", inline = "Bull")
+bearColor   = input.color(#f23645, title = "Bear Color", group = "Style", inline = "Bear")
+bearFill    = input.color(color.new(#f23645,80), title = "Fill", group = "Style", inline = "Bear")
+bslColor    = input.color(#089981, title = "BSL Color", group = "Style", inline = "Liq")
+sslColor    = input.color(#f23645, title = "SSL Color", group = "Style", inline = "Liq")
 sweepColor  = input.color(color.yellow, title = "Sweep Color", group = "Style")
+liqLineWidth = input.int(1, title = "Liquidity Line Width", minval = 1, maxval = 4, group = "Style")
 
 invis = color.rgb(0,0,0,100)
 
@@ -42,8 +47,12 @@ invis = color.rgb(0,0,0,100)
 //Functions
 //---------------------------------------------------------------------------------------------------------------------{
 
-swingHigh(len) => ta.pivothigh(high, len, len)
-swingLow(len) => ta.pivotlow(low, len, len)
+getLineStyle(_style) =>
+    switch _style
+        "───" => line.style_solid
+        "- - -" => line.style_dashed
+        "· · ·" => line.style_dotted
+        => line.style_solid
 
 isBullFvg() => low > high[2]
 isBearFvg() => high < low[2]
@@ -66,15 +75,15 @@ isCisdBear() =>
 //Variables
 //---------------------------------------------------------------------------------------------------------------------{
 
-var float[] bslLevels = array.new_float()
-var float[] sslLevels = array.new_float()
-var int[] bslBars = array.new_int()
-var int[] sslBars = array.new_int()
-
 var float[] fvgTops = array.new_float()
 var float[] fvgBottoms = array.new_float()
 var int[] fvgBars = array.new_int()
 var bool[] fvgIsBull = array.new_bool()
+
+var line[] bslLines = array.new_line()
+var line[] sslLines = array.new_line()
+var label[] bslLabels = array.new_label()
+var label[] sslLabels = array.new_label()
 
 var bool recentSslSweep    = false
 var bool recentBslSweep    = false
@@ -93,31 +102,51 @@ htfBullFvg = htfLow > htfHigh2
 htfBearFvg = htfHigh < htfLow2
 
 //---------------------------------------------------------------------------------------------------------------------}
-//Liquidity Detection
+//HTF Liquidity Detection (Swing Highs/Lows from Higher TF)
 //---------------------------------------------------------------------------------------------------------------------{
 
-sh = swingHigh(swingLen)
-sl = swingLow(swingLen)
+//Get swing data from liquidity timeframe
+[liqSwingHigh, liqSwingLow, liqHigh, liqLow, liqBarIdx] = request.security(syminfo.tickerid, tf_liq, [ta.pivothigh(high, swingLen, swingLen), ta.pivotlow(low, swingLen, swingLen), high, low, bar_index])
 
-//Add new swing highs (Buy-Side Liquidity) - FIXED to confirmed bar
-if not na(sh) and barstate.isconfirmed
-    array.push(bslLevels, sh)
-    array.push(bslBars, bar_index - swingLen)
-    if array.size(bslLevels) > liqLookback
-        array.shift(bslLevels)
-        array.shift(bslBars)
-    if showLiq
-        line.new(bar_index - swingLen, sh, bar_index, sh, color = bslColor, style = line.style_dashed, width = 1)
+//Detect new BSL level (Swing High on HTF)
+newBsl = not na(liqSwingHigh) and ta.change(liqSwingHigh) != 0
 
-//Add new swing lows (Sell-Side Liquidity) - FIXED to confirmed bar
-if not na(sl) and barstate.isconfirmed
-    array.push(sslLevels, sl)
-    array.push(sslBars, bar_index - swingLen)
-    if array.size(sslLevels) > liqLookback
-        array.shift(sslLevels)
-        array.shift(sslBars)
-    if showLiq
-        line.new(bar_index - swingLen, sl, bar_index, sl, color = sslColor, style = line.style_dashed, width = 1)
+//Detect new SSL level (Swing Low on HTF)  
+newSsl = not na(liqSwingLow) and ta.change(liqSwingLow) != 0
+
+//Add new BSL levels
+if newBsl and barstate.isconfirmed and showBsl
+    //Delete oldest if max reached
+    if array.size(bslLines) >= maxLiqLevels
+        oldLine = array.shift(bslLines)
+        oldLabel = array.shift(bslLabels)
+        line.delete(oldLine)
+        label.delete(oldLabel)
+    
+    //Create new BSL line (extended right)
+    newLine = line.new(bar_index, liqSwingHigh, bar_index + 1, liqSwingHigh, 
+                       color = bslColor, style = getLineStyle(bslStyle), width = liqLineWidth, extend = extend.right)
+    newLabel = label.new(bar_index, liqSwingHigh, text = "BSL", 
+                         style = label.style_none, textcolor = bslColor, size = size.small)
+    array.push(bslLines, newLine)
+    array.push(bslLabels, newLabel)
+
+//Add new SSL levels
+if newSsl and barstate.isconfirmed and showSsl
+    //Delete oldest if max reached
+    if array.size(sslLines) >= maxLiqLevels
+        oldLine = array.shift(sslLines)
+        oldLabel = array.shift(sslLabels)
+        line.delete(oldLine)
+        label.delete(oldLabel)
+    
+    //Create new SSL line (extended right)
+    newLine = line.new(bar_index, liqSwingLow, bar_index + 1, liqSwingLow, 
+                       color = sslColor, style = getLineStyle(sslStyle), width = liqLineWidth, extend = extend.right)
+    newLabel = label.new(bar_index, liqSwingLow, text = "SSL", 
+                         style = label.style_none, textcolor = sslColor, size = size.small)
+    array.push(sslLines, newLine)
+    array.push(sslLabels, newLabel)
 
 //---------------------------------------------------------------------------------------------------------------------}
 //Sweep Detection
@@ -126,31 +155,41 @@ if not na(sl) and barstate.isconfirmed
 bslSweep = false
 sslSweep = false
 
-//BSL Sweep Detection
-if array.size(bslLevels) > 0 and barstate.isconfirmed
-    for i = 0 to array.size(bslLevels) - 1
-        lvl = array.get(bslLevels, i)
+//BSL Sweep Detection - price sweeps above BSL then closes below
+if array.size(bslLines) > 0 and barstate.isconfirmed
+    for i = 0 to array.size(bslLines) - 1
+        ln = array.get(bslLines, i)
+        lvl = line.get_y1(ln)
         if high > lvl and close < lvl
             bslSweep := true
+            //Mark swept level
+            line.set_style(ln, line.style_dotted)
+            line.set_extend(ln, extend.none)
+            line.set_x2(ln, bar_index)
             break
 
-//SSL Sweep Detection
-if array.size(sslLevels) > 0 and barstate.isconfirmed
-    for i = 0 to array.size(sslLevels) - 1
-        lvl = array.get(sslLevels, i)
+//SSL Sweep Detection - price sweeps below SSL then closes above
+if array.size(sslLines) > 0 and barstate.isconfirmed
+    for i = 0 to array.size(sslLines) - 1
+        ln = array.get(sslLines, i)
+        lvl = line.get_y1(ln)
         if low < lvl and close > lvl
             sslSweep := true
+            //Mark swept level
+            line.set_style(ln, line.style_dotted)
+            line.set_extend(ln, extend.none)
+            line.set_x2(ln, bar_index)
             break
 
 //---------------------------------------------------------------------------------------------------------------------}
-//FVG Detection - FIXED to bar
+//FVG Detection
 //---------------------------------------------------------------------------------------------------------------------{
 
 bullFvg = isBullFvg()
 bearFvg = isBearFvg()
 fvgMinPts = minFvgSize * syminfo.mintick
 
-//Store new Bull FVGs - ONLY on confirmed bars
+//Store new Bull FVGs
 if bullFvg and (low - high[2]) >= fvgMinPts and barstate.isconfirmed
     array.push(fvgIsBull, true)
     array.push(fvgTops, low)
@@ -159,7 +198,7 @@ if bullFvg and (low - high[2]) >= fvgMinPts and barstate.isconfirmed
     if showHtfFvg
         box.new(bar_index - 2, low, bar_index + extendFvg, high[2], bgcolor = bullFill, border_color = bullColor)
 
-//Store new Bear FVGs - ONLY on confirmed bars
+//Store new Bear FVGs
 if bearFvg and (low[2] - high) >= fvgMinPts and barstate.isconfirmed
     array.push(fvgIsBull, false)
     array.push(fvgTops, low[2])
@@ -195,7 +234,7 @@ if array.size(fvgIsBull) > 0 and barstate.isconfirmed
             array.remove(fvgBars, i)
             continue
         
-        //Bullish iFVG: Originally bearish FVG, price closes above
+        //Bullish iFVG
         if not isBull and close > fvgTop and close[1] <= fvgTop
             ifvgBullSignal := true
             ifvgEntry := fvgTop
@@ -209,7 +248,7 @@ if array.size(fvgIsBull) > 0 and barstate.isconfirmed
             array.remove(fvgBars, i)
             break
             
-        //Bearish iFVG: Originally bullish FVG, price closes below
+        //Bearish iFVG
         if isBull and close < fvgBottom and close[1] >= fvgBottom
             ifvgBearSignal := true
             ifvgEntry := fvgBottom
@@ -262,18 +301,18 @@ fullLongSetup  = recentSslSweep and recentHtfBullFvg and ifvgBullSignal and cisd
 fullShortSetup = recentBslSweep and recentHtfBearFvg and ifvgBearSignal and cisdBear
 
 //---------------------------------------------------------------------------------------------------------------------}
-//Display - PLOTSHAPE (always at global scope, fixed to bars)
+//Display
 //---------------------------------------------------------------------------------------------------------------------{
 
-//Sweep Signals - fixed to bar when they occur
-plotshape(sslSweep and showSweep, title = "SSL Sweep", location = location.belowbar, style = shape.triangleup, size = size.small, color = sweepColor, text = "SSL", textcolor = sweepColor)
-plotshape(bslSweep and showSweep, title = "BSL Sweep", location = location.abovebar, style = shape.triangledown, size = size.small, color = sweepColor, text = "BSL", textcolor = sweepColor)
+//Sweep Signals
+plotshape(sslSweep and showSweep, title = "SSL Sweep", location = location.belowbar, style = shape.triangleup, size = size.small, color = sweepColor, text = "SWEEP", textcolor = sweepColor)
+plotshape(bslSweep and showSweep, title = "BSL Sweep", location = location.abovebar, style = shape.triangledown, size = size.small, color = sweepColor, text = "SWEEP", textcolor = sweepColor)
 
-//CISD Signals - fixed to bar when they occur
+//CISD Signals
 plotshape(showCisd and cisdBull, title = "CISD Bull", location = location.belowbar, style = shape.diamond, size = size.tiny, color = color.lime, text = "CISD", textcolor = color.lime)
 plotshape(showCisd and cisdBear, title = "CISD Bear", location = location.abovebar, style = shape.diamond, size = size.tiny, color = color.fuchsia, text = "CISD", textcolor = color.fuchsia)
 
-//Full Setup Entry Signals - fixed to bar when they occur
+//Full Setup Entry Signals
 plotshape(showSignals and fullLongSetup, title = "LONG Setup", location = location.belowbar, style = shape.labelup, size = size.large, color = color.green, text = "LONG", textcolor = color.white)
 plotshape(showSignals and fullShortSetup, title = "SHORT Setup", location = location.abovebar, style = shape.labeldown, size = size.large, color = color.red, text = "SHORT", textcolor = color.white)
 
