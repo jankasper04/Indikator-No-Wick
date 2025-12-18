@@ -345,14 +345,12 @@ if show_ifvg
             label.new(bar_index, ifvg_entry_level, "iFVG\nBEAR", style=label.style_label_up, color=color.red, textcolor=color.white, size=size.small)
 
 // --- Plot CISD ---
-if show_cisd
-    plotshape(cisd_bull, title="CISD Bull", location=location.belowbar, style=shape.diamond, size=size.tiny, color=color.lime, text="CISD")
-    plotshape(cisd_bear, title="CISD Bear", location=location.abovebar, style=shape.diamond, size=size.tiny, color=color.fuchsia, text="CISD")
+plotshape(show_cisd and cisd_bull, title="CISD Bull", location=location.belowbar, style=shape.diamond, size=size.tiny, color=color.lime, text="CISD")
+plotshape(show_cisd and cisd_bear, title="CISD Bear", location=location.abovebar, style=shape.diamond, size=size.tiny, color=color.fuchsia, text="CISD")
 
 // --- Plot Full Setup Entry Signals ---
-if show_entry_signals
-    plotshape(full_long_setup, title="LONG Setup", location=location.belowbar, style=shape.labelup, size=size.large, color=color.green, text="🎯 LONG", textcolor=color.white)
-    plotshape(full_short_setup, title="SHORT Setup", location=location.abovebar, style=shape.labeldown, size=size.large, color=color.red, text="🎯 SHORT", textcolor=color.white)
+plotshape(show_entry_signals and full_long_setup, title="LONG Setup", location=location.belowbar, style=shape.labelup, size=size.large, color=color.green, text="🎯 LONG", textcolor=color.white)
+plotshape(show_entry_signals and full_short_setup, title="SHORT Setup", location=location.abovebar, style=shape.labeldown, size=size.large, color=color.red, text="🎯 SHORT", textcolor=color.white)
 
 // --- Background Color for Active Setups ---
 bgcolor(full_long_setup ? color.new(color.green, 90) : na, title="Long Setup BG")
