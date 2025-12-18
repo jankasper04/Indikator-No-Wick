@@ -1,0 +1,188 @@
+// Opening Range Breakout Strategy v4 - FIXED FOR BACKTESTING
+//@version=6
+strategy("ORB Strategy v4", 
+     overlay = true,
+     initial_capital = 10000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.05,
+     slippage = 1,
+     calc_on_order_fills = true,
+     calc_on_every_tick = true,
+     use_bar_magnifier = true)
+
+//═══════════════════════════════════════════════════════════════════════════════
+// INPUTS
+//═══════════════════════════════════════════════════════════════════════════════
+
+// Strategy
+slType = input.string("Swing High/Low + ATR", "Stop Loss Type", options = ["Swing High/Low + ATR", "Middle of ORB Range"])
+rrRatio = input.float(2.0, "Risk/Reward", minval = 0.5, step = 0.5)
+atrLen = input.int(14, "ATR Length")
+atrMult = input.float(0.5, "ATR Multiplier", step = 0.1)
+swingLen = input.int(5, "Swing Lookback")
+
+// Direction
+doLongs = input.bool(true, "Long Trades")
+doShorts = input.bool(true, "Short Trades")
+
+// Session - WICHTIG: Stelle diese auf deine OR Zeit ein!
+sessionOR = input.session("1530-1545", "OR Session (15 min)")
+sessionTZ = input.string("UTC+1", "Timezone", options = ["UTC-5", "UTC-4", "UTC+0", "UTC+1", "UTC+2"])
+
+//═══════════════════════════════════════════════════════════════════════════════
+// SESSION ERKENNUNG
+//═══════════════════════════════════════════════════════════════════════════════
+
+var bool inSession = false
+inSession := not na(time(timeframe.period, sessionOR, sessionTZ))
+
+bool sessionStart = inSession and not inSession[1]
+bool sessionEnd = not inSession and inSession[1]
+
+//═══════════════════════════════════════════════════════════════════════════════
+// OPENING RANGE BERECHNUNG
+//═══════════════════════════════════════════════════════════════════════════════
+
+var float ORH = na
+var float ORL = na  
+var float ORM = na
+var bool ORReady = false
+var int ORBar = na
+
+// Session Start - Reset
+if sessionStart
+    ORH := high
+    ORL := low
+    ORReady := false
+    ORBar := bar_index
+
+// Während Session - Update High/Low
+if inSession
+    ORH := math.max(nz(ORH, high), high)
+    ORL := math.min(nz(ORL, low), low)
+
+// Session Ende - OR ist fertig
+if sessionEnd
+    ORM := (ORH + ORL) / 2.0
+    ORReady := true
+
+//═══════════════════════════════════════════════════════════════════════════════
+// ATR & SWING BERECHNUNG
+//═══════════════════════════════════════════════════════════════════════════════
+
+atrVal = ta.atr(atrLen)
+
+// Swing High finden
+pivotHi = ta.pivothigh(high, swingLen, swingLen)
+var float lastSwingHi = na
+if not na(pivotHi)
+    lastSwingHi := pivotHi
+
+// Swing Low finden  
+pivotLo = ta.pivotlow(low, swingLen, swingLen)
+var float lastSwingLo = na
+if not na(pivotLo)
+    lastSwingLo := pivotLo
+
+//═══════════════════════════════════════════════════════════════════════════════
+// ENTRY BEDINGUNGEN
+//═══════════════════════════════════════════════════════════════════════════════
+
+bool noPosition = strategy.position_size == 0
+
+// LONG: Kerze schließt ÜBER ORH
+bool longSignal = ORReady and not inSession and noPosition and close > ORH and close[1] <= ORH
+
+// SHORT: Kerze schließt UNTER ORL
+bool shortSignal = ORReady and not inSession and noPosition and close < ORL and close[1] >= ORL
+
+//═══════════════════════════════════════════════════════════════════════════════
+// STOP LOSS BERECHNUNG
+//═══════════════════════════════════════════════════════════════════════════════
+
+calcLongSL() =>
+    float sl = ORM
+    if slType == "Swing High/Low + ATR"
+        swingL = na(lastSwingLo) ? ORL : lastSwingLo
+        sl := swingL - atrVal * atrMult
+    math.min(sl, ORL - atrVal * 0.25)  // Mindestens unter ORL
+
+calcShortSL() =>
+    float sl = ORM
+    if slType == "Swing High/Low + ATR"
+        swingH = na(lastSwingHi) ? ORH : lastSwingHi
+        sl := swingH + atrVal * atrMult
+    math.max(sl, ORH + atrVal * 0.25)  // Mindestens über ORH
+
+//═══════════════════════════════════════════════════════════════════════════════
+// TRADE AUSFÜHRUNG
+//═══════════════════════════════════════════════════════════════════════════════
+
+if longSignal and doLongs
+    float mySL = calcLongSL()
+    float risk = close - mySL
+    float myTP = close + risk * rrRatio
+    
+    strategy.entry("L", strategy.long, comment = "Long Entry")
+    strategy.exit("L-Exit", "L", stop = mySL, limit = myTP, comment_profit = "TP", comment_loss = "SL")
+
+if shortSignal and doShorts
+    float mySL = calcShortSL()
+    float risk = mySL - close
+    float myTP = close - risk * rrRatio
+    
+    strategy.entry("S", strategy.short, comment = "Short Entry")
+    strategy.exit("S-Exit", "S", stop = mySL, limit = myTP, comment_profit = "TP", comment_loss = "SL")
+
+//═══════════════════════════════════════════════════════════════════════════════
+// VISUALISIERUNG
+//═══════════════════════════════════════════════════════════════════════════════
+
+// OR Session Hintergrund
+bgcolor(inSession ? color.new(color.blue, 85) : na, title = "OR Session")
+
+// OR Linien
+plot(ORReady and not inSession ? ORH : na, "ORH", color.green, 2, plot.style_linebr)
+plot(ORReady and not inSession ? ORL : na, "ORL", color.red, 2, plot.style_linebr)
+plot(ORReady and not inSession ? ORM : na, "ORM", color.gray, 1, plot.style_linebr)
+
+// Entry Signale
+plotshape(longSignal and doLongs, "Long", shape.triangleup, location.belowbar, color.green, size = size.small)
+plotshape(shortSignal and doShorts, "Short", shape.triangledown, location.abovebar, color.red, size = size.small)
+
+//═══════════════════════════════════════════════════════════════════════════════
+// INFO BOX
+//═══════════════════════════════════════════════════════════════════════════════
+
+var table infoBox = table.new(position.top_right, 2, 7, bgcolor = color.new(#000000, 70), border_width = 1)
+
+if barstate.islast
+    table.cell(infoBox, 0, 0, "ORB v4", text_color = color.white, text_size = size.normal)
+    table.cell(infoBox, 1, 0, "", text_color = color.white)
+    
+    table.cell(infoBox, 0, 1, "ORH:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 1, str.tostring(ORH, format.mintick), text_color = color.green, text_size = size.small)
+    
+    table.cell(infoBox, 0, 2, "ORL:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 2, str.tostring(ORL, format.mintick), text_color = color.red, text_size = size.small)
+    
+    table.cell(infoBox, 0, 3, "ORM:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 3, str.tostring(ORM, format.mintick), text_color = color.gray, text_size = size.small)
+    
+    table.cell(infoBox, 0, 4, "SL Type:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 4, slType == "Middle of ORB Range" ? "ORM" : "Swing+ATR", text_color = color.orange, text_size = size.small)
+    
+    table.cell(infoBox, 0, 5, "R:R:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 5, str.tostring(rrRatio), text_color = color.yellow, text_size = size.small)
+    
+    table.cell(infoBox, 0, 6, "Trades:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 6, str.tostring(strategy.closedtrades + strategy.opentrades), text_color = color.aqua, text_size = size.small)
+
+//═══════════════════════════════════════════════════════════════════════════════
+// ALERTS
+//═══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(longSignal, "Long Signal", "ORB Long Breakout!")
+alertcondition(shortSignal, "Short Signal", "ORB Short Breakout!")
