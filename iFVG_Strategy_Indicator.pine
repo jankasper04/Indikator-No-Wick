@@ -9,11 +9,11 @@ indicator("iFVG Multi-Timeframe Strategy", shorttitle = "iFVG MTF Strategy", ove
 //---------------------------------------------------------------------------------------------------------------------{
 
 //Timeframe Settings
-tf_liq      = input.timeframe("60", title = "Liquidity TF", group = "Timeframe Settings", tooltip = "H1 or M15 for Liquidity Levels", options = ["15", "60"])
+tf_liq      = input.timeframe("60", title = "Liquidity TF", group = "Timeframe Settings", tooltip = "H1 or M15 for Liquidity Levels")
 tf_htf      = input.timeframe("15", title = "HTF FVG Timeframe", group = "Timeframe Settings", tooltip = "M5, M15 or H1 for Higher TF FVG")
 
 //Detection Settings
-swingLen    = input.int(5, title = "Swing Length", minval = 2, maxval = 20, group = "Detection Settings", tooltip = "Number of bars for swing detection")
+swingLen    = input.int(5, title = "Swing Length", minval = 2, maxval = 20, group = "Detection Settings")
 minFvgSize  = input.float(5.0, title = "Min FVG Size (Points)", minval = 0.1, group = "Detection Settings")
 ifvgLookback = input.int(50, title = "iFVG Lookback", minval = 10, maxval = 200, group = "Detection Settings")
 maxLiqLevels = input.int(10, title = "Max Liquidity Levels", minval = 1, maxval = 20, group = "Detection Settings")
@@ -23,13 +23,12 @@ showBsl     = input.bool(true, title = "Show BSL Levels", group = "Display Setti
 bslStyle    = input.string("───", title = "", options = ["───", "- - -", "· · ·"], group = "Display Settings", inline = "BSL")
 showSsl     = input.bool(true, title = "Show SSL Levels", group = "Display Settings", inline = "SSL")
 sslStyle    = input.string("───", title = "", options = ["───", "- - -", "· · ·"], group = "Display Settings", inline = "SSL")
-showHtfFvg  = input.bool(true, title = "Show HTF FVG Zones", group = "Display Settings")
+showFvg     = input.bool(true, title = "Show FVG Zones", group = "Display Settings")
 showIfvg    = input.bool(true, title = "Show iFVG Zones", group = "Display Settings")
 showCisd    = input.bool(true, title = "Show CISD Signals", group = "Display Settings")
 showSweep   = input.bool(true, title = "Show Sweep Signals", group = "Display Settings")
 showSignals = input.bool(true, title = "Show Entry Signals", group = "Display Settings")
 showTable   = input.bool(true, title = "Show Info Table", group = "Display Settings")
-extendFvg   = input.int(20, title = "Extend FVG Boxes (bars)", minval = 5, maxval = 100, group = "Display Settings")
 
 //Style
 bullColor   = input.color(#089981, title = "Bull Color", group = "Style", inline = "Bull")
@@ -77,12 +76,17 @@ isCisdBear() =>
 
 var float[] fvgTops = array.new_float()
 var float[] fvgBottoms = array.new_float()
-var int[] fvgBars = array.new_int()
+var int[] fvgTimes = array.new_int()
 var bool[] fvgIsBull = array.new_bool()
 
+var float[] bslPrices = array.new_float()
+var int[] bslTimes = array.new_int()
 var line[] bslLines = array.new_line()
-var line[] sslLines = array.new_line()
 var label[] bslLabels = array.new_label()
+
+var float[] sslPrices = array.new_float()
+var int[] sslTimes = array.new_int()
+var line[] sslLines = array.new_line()
 var label[] sslLabels = array.new_label()
 
 var bool recentSslSweep    = false
@@ -102,51 +106,57 @@ htfBullFvg = htfLow > htfHigh2
 htfBearFvg = htfHigh < htfLow2
 
 //---------------------------------------------------------------------------------------------------------------------}
-//HTF Liquidity Detection (Swing Highs/Lows from Higher TF)
+//HTF Liquidity Detection - Using TIME for fixed positioning
 //---------------------------------------------------------------------------------------------------------------------{
 
 //Get swing data from liquidity timeframe
-[liqSwingHigh, liqSwingLow, liqHigh, liqLow, liqBarIdx] = request.security(syminfo.tickerid, tf_liq, [ta.pivothigh(high, swingLen, swingLen), ta.pivotlow(low, swingLen, swingLen), high, low, bar_index])
+[liqSwingHigh, liqSwingLow, liqTime] = request.security(syminfo.tickerid, tf_liq, [ta.pivothigh(high, swingLen, swingLen), ta.pivotlow(low, swingLen, swingLen), time[swingLen]])
 
-//Detect new BSL level (Swing High on HTF)
-newBsl = not na(liqSwingHigh) and ta.change(liqSwingHigh) != 0
+//Detect new BSL level
+newBsl = not na(liqSwingHigh) and (array.size(bslPrices) == 0 or liqSwingHigh != array.last(bslPrices))
 
-//Detect new SSL level (Swing Low on HTF)  
-newSsl = not na(liqSwingLow) and ta.change(liqSwingLow) != 0
+//Detect new SSL level
+newSsl = not na(liqSwingLow) and (array.size(sslPrices) == 0 or liqSwingLow != array.last(sslPrices))
 
-//Add new BSL levels
+//Add new BSL levels - FIXED with xloc.bar_time
 if newBsl and barstate.isconfirmed and showBsl
-    //Delete oldest if max reached
     if array.size(bslLines) >= maxLiqLevels
-        oldLine = array.shift(bslLines)
-        oldLabel = array.shift(bslLabels)
-        line.delete(oldLine)
-        label.delete(oldLabel)
+        line.delete(array.shift(bslLines))
+        label.delete(array.shift(bslLabels))
+        array.shift(bslPrices)
+        array.shift(bslTimes)
     
-    //Create new BSL line (extended right)
-    newLine = line.new(bar_index, liqSwingHigh, bar_index + 1, liqSwingHigh, 
-                       color = bslColor, style = getLineStyle(bslStyle), width = liqLineWidth, extend = extend.right)
-    newLabel = label.new(bar_index, liqSwingHigh, text = "BSL", 
-                         style = label.style_none, textcolor = bslColor, size = size.small)
+    array.push(bslPrices, liqSwingHigh)
+    array.push(bslTimes, liqTime)
+    
+    //Create line with xloc.bar_time - FIXED to time, extends right
+    newLine = line.new(liqTime, liqSwingHigh, time + 86400000, liqSwingHigh, 
+                       xloc = xloc.bar_time, color = bslColor, style = getLineStyle(bslStyle), 
+                       width = liqLineWidth, extend = extend.right)
+    newLbl = label.new(liqTime, liqSwingHigh, text = "BSL", xloc = xloc.bar_time,
+                       style = label.style_none, textcolor = bslColor, size = size.small)
     array.push(bslLines, newLine)
-    array.push(bslLabels, newLabel)
+    array.push(bslLabels, newLbl)
 
-//Add new SSL levels
+//Add new SSL levels - FIXED with xloc.bar_time
 if newSsl and barstate.isconfirmed and showSsl
-    //Delete oldest if max reached
     if array.size(sslLines) >= maxLiqLevels
-        oldLine = array.shift(sslLines)
-        oldLabel = array.shift(sslLabels)
-        line.delete(oldLine)
-        label.delete(oldLabel)
+        line.delete(array.shift(sslLines))
+        label.delete(array.shift(sslLabels))
+        array.shift(sslPrices)
+        array.shift(sslTimes)
     
-    //Create new SSL line (extended right)
-    newLine = line.new(bar_index, liqSwingLow, bar_index + 1, liqSwingLow, 
-                       color = sslColor, style = getLineStyle(sslStyle), width = liqLineWidth, extend = extend.right)
-    newLabel = label.new(bar_index, liqSwingLow, text = "SSL", 
-                         style = label.style_none, textcolor = sslColor, size = size.small)
+    array.push(sslPrices, liqSwingLow)
+    array.push(sslTimes, liqTime)
+    
+    //Create line with xloc.bar_time - FIXED to time, extends right
+    newLine = line.new(liqTime, liqSwingLow, time + 86400000, liqSwingLow, 
+                       xloc = xloc.bar_time, color = sslColor, style = getLineStyle(sslStyle), 
+                       width = liqLineWidth, extend = extend.right)
+    newLbl = label.new(liqTime, liqSwingLow, text = "SSL", xloc = xloc.bar_time,
+                       style = label.style_none, textcolor = sslColor, size = size.small)
     array.push(sslLines, newLine)
-    array.push(sslLabels, newLabel)
+    array.push(sslLabels, newLbl)
 
 //---------------------------------------------------------------------------------------------------------------------}
 //Sweep Detection
@@ -155,34 +165,36 @@ if newSsl and barstate.isconfirmed and showSsl
 bslSweep = false
 sslSweep = false
 
-//BSL Sweep Detection - price sweeps above BSL then closes below
-if array.size(bslLines) > 0 and barstate.isconfirmed
-    for i = 0 to array.size(bslLines) - 1
-        ln = array.get(bslLines, i)
-        lvl = line.get_y1(ln)
+//BSL Sweep Detection
+if array.size(bslPrices) > 0 and barstate.isconfirmed
+    for i = array.size(bslPrices) - 1 to 0
+        lvl = array.get(bslPrices, i)
         if high > lvl and close < lvl
             bslSweep := true
-            //Mark swept level
-            line.set_style(ln, line.style_dotted)
-            line.set_extend(ln, extend.none)
-            line.set_x2(ln, bar_index)
+            //Mark swept - stop extending
+            if i < array.size(bslLines)
+                ln = array.get(bslLines, i)
+                line.set_extend(ln, extend.none)
+                line.set_x2(ln, time)
+                line.set_style(ln, line.style_dotted)
             break
 
-//SSL Sweep Detection - price sweeps below SSL then closes above
-if array.size(sslLines) > 0 and barstate.isconfirmed
-    for i = 0 to array.size(sslLines) - 1
-        ln = array.get(sslLines, i)
-        lvl = line.get_y1(ln)
+//SSL Sweep Detection
+if array.size(sslPrices) > 0 and barstate.isconfirmed
+    for i = array.size(sslPrices) - 1 to 0
+        lvl = array.get(sslPrices, i)
         if low < lvl and close > lvl
             sslSweep := true
-            //Mark swept level
-            line.set_style(ln, line.style_dotted)
-            line.set_extend(ln, extend.none)
-            line.set_x2(ln, bar_index)
+            //Mark swept - stop extending
+            if i < array.size(sslLines)
+                ln = array.get(sslLines, i)
+                line.set_extend(ln, extend.none)
+                line.set_x2(ln, time)
+                line.set_style(ln, line.style_dotted)
             break
 
 //---------------------------------------------------------------------------------------------------------------------}
-//FVG Detection
+//FVG Detection - FIXED with xloc.bar_time
 //---------------------------------------------------------------------------------------------------------------------{
 
 bullFvg = isBullFvg()
@@ -194,18 +206,20 @@ if bullFvg and (low - high[2]) >= fvgMinPts and barstate.isconfirmed
     array.push(fvgIsBull, true)
     array.push(fvgTops, low)
     array.push(fvgBottoms, high[2])
-    array.push(fvgBars, bar_index - 2)
-    if showHtfFvg
-        box.new(bar_index - 2, low, bar_index + extendFvg, high[2], bgcolor = bullFill, border_color = bullColor)
+    array.push(fvgTimes, time[2])
+    if showFvg
+        box.new(time[2], low, time + 3600000, high[2], xloc = xloc.bar_time, 
+                bgcolor = bullFill, border_color = bullColor)
 
 //Store new Bear FVGs
 if bearFvg and (low[2] - high) >= fvgMinPts and barstate.isconfirmed
     array.push(fvgIsBull, false)
     array.push(fvgTops, low[2])
     array.push(fvgBottoms, high)
-    array.push(fvgBars, bar_index - 2)
-    if showHtfFvg
-        box.new(bar_index - 2, low[2], bar_index + extendFvg, high, bgcolor = bearFill, border_color = bearColor)
+    array.push(fvgTimes, time[2])
+    if showFvg
+        box.new(time[2], low[2], time + 3600000, high, xloc = xloc.bar_time, 
+                bgcolor = bearFill, border_color = bearColor)
 
 //---------------------------------------------------------------------------------------------------------------------}
 //iFVG Detection
@@ -224,14 +238,14 @@ if array.size(fvgIsBull) > 0 and barstate.isconfirmed
         isBull = array.get(fvgIsBull, i)
         fvgTop = array.get(fvgTops, i)
         fvgBottom = array.get(fvgBottoms, i)
-        startBar = array.get(fvgBars, i)
+        fvgTime = array.get(fvgTimes, i)
         
-        //Remove old FVGs
-        if bar_index - startBar > ifvgLookback
+        //Remove old FVGs (older than lookback bars worth of time)
+        if time - fvgTime > ifvgLookback * timeframe.in_seconds(timeframe.period) * 1000
             array.remove(fvgIsBull, i)
             array.remove(fvgTops, i)
             array.remove(fvgBottoms, i)
-            array.remove(fvgBars, i)
+            array.remove(fvgTimes, i)
             continue
         
         //Bullish iFVG
@@ -240,12 +254,14 @@ if array.size(fvgIsBull) > 0 and barstate.isconfirmed
             ifvgEntry := fvgTop
             ifvgSl := fvgBottom
             if showIfvg
-                box.new(startBar, fvgBottom, bar_index + extendFvg, fvgTop, bgcolor = bullFill, border_color = bullColor, border_width = 2)
-                label.new(bar_index, fvgTop, text = "iFVG", style = label.style_label_left, color = invis, textcolor = bullColor, size = size.small)
+                box.new(fvgTime, fvgBottom, time + 3600000, fvgTop, xloc = xloc.bar_time,
+                        bgcolor = bullFill, border_color = bullColor, border_width = 2)
+                label.new(time, fvgTop, text = "iFVG", xloc = xloc.bar_time,
+                          style = label.style_label_left, color = invis, textcolor = bullColor, size = size.small)
             array.remove(fvgIsBull, i)
             array.remove(fvgTops, i)
             array.remove(fvgBottoms, i)
-            array.remove(fvgBars, i)
+            array.remove(fvgTimes, i)
             break
             
         //Bearish iFVG
@@ -254,12 +270,14 @@ if array.size(fvgIsBull) > 0 and barstate.isconfirmed
             ifvgEntry := fvgBottom
             ifvgSl := fvgTop
             if showIfvg
-                box.new(startBar, fvgBottom, bar_index + extendFvg, fvgTop, bgcolor = bearFill, border_color = bearColor, border_width = 2)
-                label.new(bar_index, fvgBottom, text = "iFVG", style = label.style_label_left, color = invis, textcolor = bearColor, size = size.small)
+                box.new(fvgTime, fvgBottom, time + 3600000, fvgTop, xloc = xloc.bar_time,
+                        bgcolor = bearFill, border_color = bearColor, border_width = 2)
+                label.new(time, fvgBottom, text = "iFVG", xloc = xloc.bar_time,
+                          style = label.style_label_left, color = invis, textcolor = bearColor, size = size.small)
             array.remove(fvgIsBull, i)
             array.remove(fvgTops, i)
             array.remove(fvgBottoms, i)
-            array.remove(fvgBars, i)
+            array.remove(fvgTimes, i)
             break
 
 //---------------------------------------------------------------------------------------------------------------------}
@@ -301,22 +319,18 @@ fullLongSetup  = recentSslSweep and recentHtfBullFvg and ifvgBullSignal and cisd
 fullShortSetup = recentBslSweep and recentHtfBearFvg and ifvgBearSignal and cisdBear
 
 //---------------------------------------------------------------------------------------------------------------------}
-//Display
+//Display - plotshape is always fixed to bars
 //---------------------------------------------------------------------------------------------------------------------{
 
-//Sweep Signals
 plotshape(sslSweep and showSweep, title = "SSL Sweep", location = location.belowbar, style = shape.triangleup, size = size.small, color = sweepColor, text = "SWEEP", textcolor = sweepColor)
 plotshape(bslSweep and showSweep, title = "BSL Sweep", location = location.abovebar, style = shape.triangledown, size = size.small, color = sweepColor, text = "SWEEP", textcolor = sweepColor)
 
-//CISD Signals
 plotshape(showCisd and cisdBull, title = "CISD Bull", location = location.belowbar, style = shape.diamond, size = size.tiny, color = color.lime, text = "CISD", textcolor = color.lime)
 plotshape(showCisd and cisdBear, title = "CISD Bear", location = location.abovebar, style = shape.diamond, size = size.tiny, color = color.fuchsia, text = "CISD", textcolor = color.fuchsia)
 
-//Full Setup Entry Signals
 plotshape(showSignals and fullLongSetup, title = "LONG Setup", location = location.belowbar, style = shape.labelup, size = size.large, color = color.green, text = "LONG", textcolor = color.white)
 plotshape(showSignals and fullShortSetup, title = "SHORT Setup", location = location.abovebar, style = shape.labeldown, size = size.large, color = color.red, text = "SHORT", textcolor = color.white)
 
-//Background
 bgcolor(fullLongSetup ? color.new(color.green, 90) : na, title = "Long BG")
 bgcolor(fullShortSetup ? color.new(color.red, 90) : na, title = "Short BG")
 
