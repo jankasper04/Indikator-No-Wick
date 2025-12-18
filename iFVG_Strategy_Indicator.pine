@@ -1,0 +1,233 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © iFVG Strategy
+
+//@version=6
+indicator("iFVG Multi-Timeframe Strategy", shorttitle = "iFVG MTF", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//Settings
+//---------------------------------------------------------------------------------------------------------------------{
+
+tf_liq      = input.timeframe("60", title = "Liquidity TF", group = "Timeframe Settings")
+swingLen    = input.int(5, title = "Swing Length", minval = 2, maxval = 20, group = "Detection Settings")
+minFvgSize  = input.float(5.0, title = "Min FVG Size (Points)", minval = 0.1, group = "Detection Settings")
+
+showBsl     = input.bool(true, title = "Show BSL", group = "Display", inline = "liq")
+showSsl     = input.bool(true, title = "Show SSL", group = "Display", inline = "liq")
+showFvg     = input.bool(true, title = "Show FVG", group = "Display")
+showCisd    = input.bool(true, title = "Show CISD", group = "Display")
+showSweep   = input.bool(true, title = "Show Sweeps", group = "Display")
+
+bullColor   = input.color(#089981, title = "Bull", group = "Style", inline = "col")
+bearColor   = input.color(#f23645, title = "Bear", group = "Style", inline = "col")
+sweepColor  = input.color(color.yellow, title = "Sweep", group = "Style", inline = "col")
+
+//---------------------------------------------------------------------------------------------------------------------}
+//HTF Swing Detection
+//---------------------------------------------------------------------------------------------------------------------{
+
+// Get HTF swing highs and lows
+htf_h = request.security(syminfo.tickerid, tf_liq, high)
+htf_l = request.security(syminfo.tickerid, tf_liq, low)
+htf_ph = request.security(syminfo.tickerid, tf_liq, ta.pivothigh(high, swingLen, swingLen))
+htf_pl = request.security(syminfo.tickerid, tf_liq, ta.pivotlow(low, swingLen, swingLen))
+
+// Detect new pivot
+newSwingHigh = not na(htf_ph) and ta.change(htf_ph) != 0
+newSwingLow = not na(htf_pl) and ta.change(htf_pl) != 0
+
+//---------------------------------------------------------------------------------------------------------------------}
+//Draw BSL/SSL with hline approach - FIXED levels
+//---------------------------------------------------------------------------------------------------------------------{
+
+// Store levels
+var float bsl1 = na, var float bsl2 = na, var float bsl3 = na, var float bsl4 = na, var float bsl5 = na
+var float ssl1 = na, var float ssl2 = na, var float ssl3 = na, var float ssl4 = na, var float ssl5 = na
+
+// Update BSL levels (shift down, add new)
+if newSwingHigh
+    bsl5 := bsl4
+    bsl4 := bsl3
+    bsl3 := bsl2
+    bsl2 := bsl1
+    bsl1 := htf_ph
+
+// Update SSL levels (shift down, add new)
+if newSwingLow
+    ssl5 := ssl4
+    ssl4 := ssl3
+    ssl3 := ssl2
+    ssl2 := ssl1
+    ssl1 := htf_pl
+
+// Plot BSL levels - these are FIXED horizontal lines
+plot(showBsl and not na(bsl1) ? bsl1 : na, "BSL 1", color = bullColor, style = plot.style_linebr, linewidth = 1)
+plot(showBsl and not na(bsl2) ? bsl2 : na, "BSL 2", color = bullColor, style = plot.style_linebr, linewidth = 1)
+plot(showBsl and not na(bsl3) ? bsl3 : na, "BSL 3", color = bullColor, style = plot.style_linebr, linewidth = 1)
+plot(showBsl and not na(bsl4) ? bsl4 : na, "BSL 4", color = bullColor, style = plot.style_linebr, linewidth = 1)
+plot(showBsl and not na(bsl5) ? bsl5 : na, "BSL 5", color = bullColor, style = plot.style_linebr, linewidth = 1)
+
+// Plot SSL levels - these are FIXED horizontal lines
+plot(showSsl and not na(ssl1) ? ssl1 : na, "SSL 1", color = bearColor, style = plot.style_linebr, linewidth = 1)
+plot(showSsl and not na(ssl2) ? ssl2 : na, "SSL 2", color = bearColor, style = plot.style_linebr, linewidth = 1)
+plot(showSsl and not na(ssl3) ? ssl3 : na, "SSL 3", color = bearColor, style = plot.style_linebr, linewidth = 1)
+plot(showSsl and not na(ssl4) ? ssl4 : na, "SSL 4", color = bearColor, style = plot.style_linebr, linewidth = 1)
+plot(showSsl and not na(ssl5) ? ssl5 : na, "SSL 5", color = bearColor, style = plot.style_linebr, linewidth = 1)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//Sweep Detection
+//---------------------------------------------------------------------------------------------------------------------{
+
+// Check if price sweeps any BSL level
+bslSweep = (high > bsl1 and close < bsl1) or (high > bsl2 and close < bsl2) or 
+           (high > bsl3 and close < bsl3) or (high > bsl4 and close < bsl4) or (high > bsl5 and close < bsl5)
+
+// Check if price sweeps any SSL level
+sslSweep = (low < ssl1 and close > ssl1) or (low < ssl2 and close > ssl2) or 
+           (low < ssl3 and close > ssl3) or (low < ssl4 and close > ssl4) or (low < ssl5 and close > ssl5)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//FVG Detection
+//---------------------------------------------------------------------------------------------------------------------{
+
+bullFvg = low > high[2] and (low - high[2]) >= minFvgSize * syminfo.mintick
+bearFvg = high < low[2] and (low[2] - high) >= minFvgSize * syminfo.mintick
+
+// Store FVG data for inversion detection
+var float[] fvgTop = array.new_float()
+var float[] fvgBot = array.new_float()
+var bool[] fvgBull = array.new_bool()
+var int[] fvgBar = array.new_int()
+
+// Add new FVGs
+if bullFvg
+    array.push(fvgTop, low)
+    array.push(fvgBot, high[2])
+    array.push(fvgBull, true)
+    array.push(fvgBar, bar_index - 2)
+
+if bearFvg
+    array.push(fvgTop, low[2])
+    array.push(fvgBot, high)
+    array.push(fvgBull, false)
+    array.push(fvgBar, bar_index - 2)
+
+// Limit array size
+if array.size(fvgTop) > 50
+    array.shift(fvgTop)
+    array.shift(fvgBot)
+    array.shift(fvgBull)
+    array.shift(fvgBar)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//iFVG Detection
+//---------------------------------------------------------------------------------------------------------------------{
+
+ifvgBull = false
+ifvgBear = false
+
+if array.size(fvgTop) > 0
+    for i = array.size(fvgTop) - 1 to 0
+        if i >= array.size(fvgTop)
+            continue
+        
+        top = array.get(fvgTop, i)
+        bot = array.get(fvgBot, i)
+        isBull = array.get(fvgBull, i)
+        startBar = array.get(fvgBar, i)
+        
+        // Remove old
+        if bar_index - startBar > 50
+            array.remove(fvgTop, i)
+            array.remove(fvgBot, i)
+            array.remove(fvgBull, i)
+            array.remove(fvgBar, i)
+            continue
+        
+        // Bullish iFVG (bearish FVG inverts)
+        if not isBull and close > top and close[1] <= top
+            ifvgBull := true
+            array.remove(fvgTop, i)
+            array.remove(fvgBot, i)
+            array.remove(fvgBull, i)
+            array.remove(fvgBar, i)
+            break
+        
+        // Bearish iFVG (bullish FVG inverts)
+        if isBull and close < bot and close[1] >= bot
+            ifvgBear := true
+            array.remove(fvgTop, i)
+            array.remove(fvgBot, i)
+            array.remove(fvgBull, i)
+            array.remove(fvgBar, i)
+            break
+
+//---------------------------------------------------------------------------------------------------------------------}
+//CISD Detection
+//---------------------------------------------------------------------------------------------------------------------{
+
+cisdBull = (close - open) > 0 and (close - open) / (high - low) > 0.6 and close[1] < open[1] and close[2] < open[2]
+cisdBear = (open - close) > 0 and (open - close) / (high - low) > 0.6 and close[1] > open[1] and close[2] > open[2]
+
+//---------------------------------------------------------------------------------------------------------------------}
+//Setup Tracking
+//---------------------------------------------------------------------------------------------------------------------{
+
+var bool recentSslSweep = false
+var bool recentBslSweep = false
+var int sweepBar = 0
+
+if sslSweep
+    recentSslSweep := true
+    sweepBar := bar_index
+    
+if bslSweep
+    recentBslSweep := true
+    sweepBar := bar_index
+
+if bar_index - sweepBar > 50
+    recentSslSweep := false
+    recentBslSweep := false
+
+fullLong = recentSslSweep and ifvgBull and cisdBull
+fullShort = recentBslSweep and ifvgBear and cisdBear
+
+//---------------------------------------------------------------------------------------------------------------------}
+//Plotting - FIXED to bars via plotshape
+//---------------------------------------------------------------------------------------------------------------------{
+
+// FVG markers
+plotshape(showFvg and bullFvg, "Bull FVG", shape.square, location.belowbar, bullColor, size = size.tiny)
+plotshape(showFvg and bearFvg, "Bear FVG", shape.square, location.abovebar, bearColor, size = size.tiny)
+
+// Sweep markers
+plotshape(showSweep and sslSweep, "SSL Sweep", shape.triangleup, location.belowbar, sweepColor, size = size.small, text = "SWEEP")
+plotshape(showSweep and bslSweep, "BSL Sweep", shape.triangledown, location.abovebar, sweepColor, size = size.small, text = "SWEEP")
+
+// CISD markers
+plotshape(showCisd and cisdBull, "CISD Bull", shape.diamond, location.belowbar, color.lime, size = size.tiny, text = "CISD")
+plotshape(showCisd and cisdBear, "CISD Bear", shape.diamond, location.abovebar, color.fuchsia, size = size.tiny, text = "CISD")
+
+// iFVG markers
+plotshape(ifvgBull, "iFVG Bull", shape.circle, location.belowbar, bullColor, size = size.small, text = "iFVG")
+plotshape(ifvgBear, "iFVG Bear", shape.circle, location.abovebar, bearColor, size = size.small, text = "iFVG")
+
+// Full setup signals
+plotshape(fullLong, "LONG", shape.labelup, location.belowbar, color.green, size = size.large, text = "LONG", textcolor = color.white)
+plotshape(fullShort, "SHORT", shape.labeldown, location.abovebar, color.red, size = size.large, text = "SHORT", textcolor = color.white)
+
+// Background
+bgcolor(fullLong ? color.new(color.green, 90) : fullShort ? color.new(color.red, 90) : na)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//Alerts
+//---------------------------------------------------------------------------------------------------------------------{
+
+alertcondition(sslSweep, "SSL Sweep", "SSL Sweep on {{ticker}}")
+alertcondition(bslSweep, "BSL Sweep", "BSL Sweep on {{ticker}}")
+alertcondition(ifvgBull, "Bullish iFVG", "Bullish iFVG on {{ticker}}")
+alertcondition(ifvgBear, "Bearish iFVG", "Bearish iFVG on {{ticker}}")
+alertcondition(fullLong, "FULL LONG", "FULL LONG on {{ticker}}")
+alertcondition(fullShort, "FULL SHORT", "FULL SHORT on {{ticker}}")
+
+//---------------------------------------------------------------------------------------------------------------------}
