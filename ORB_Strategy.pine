@@ -1,255 +1,188 @@
-// Opening Range Breakout Strategy v3
-// Simplified version that actually executes trades
-
+// Opening Range Breakout Strategy v4 - FIXED FOR BACKTESTING
 //@version=6
-strategy("ORB Strategy v3", shorttitle = "ORB v3", overlay = true, 
-         max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500,
-         default_qty_type = strategy.percent_of_equity, default_qty_value = 100,
-         initial_capital = 10000, commission_type = strategy.commission.percent, commission_value = 0.1,
-         fill_orders_on_standard_ohlc = true)
+strategy("ORB Strategy v4", 
+     overlay = true,
+     initial_capital = 10000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.05,
+     slippage = 1,
+     calc_on_order_fills = true,
+     calc_on_every_tick = true,
+     use_bar_magnifier = true)
 
-//---------------------------------------------------------------------------------------------------------------------}
+//═══════════════════════════════════════════════════════════════════════════════
 // INPUTS
-//---------------------------------------------------------------------------------------------------------------------{
+//═══════════════════════════════════════════════════════════════════════════════
 
-grpStrategy = "Strategy Settings"
-slType = input.string("Swing High/Low + ATR", title = "Stop Loss Type", options = ["Swing High/Low + ATR", "Middle of ORB Range"], group = grpStrategy)
-rrRatio = input.float(2.0, title = "Risk/Reward Ratio", minval = 0.5, maxval = 10, step = 0.5, group = grpStrategy)
-atrLength = input.int(14, title = "ATR Length", minval = 1, group = grpStrategy)
-atrMultiplier = input.float(0.5, title = "ATR Buffer Multiplier", minval = 0.1, maxval = 3.0, step = 0.1, group = grpStrategy)
-swingLookback = input.int(5, title = "Swing Lookback", minval = 2, maxval = 20, group = grpStrategy)
+// Strategy
+slType = input.string("Swing High/Low + ATR", "Stop Loss Type", options = ["Swing High/Low + ATR", "Middle of ORB Range"])
+rrRatio = input.float(2.0, "Risk/Reward", minval = 0.5, step = 0.5)
+atrLen = input.int(14, "ATR Length")
+atrMult = input.float(0.5, "ATR Multiplier", step = 0.1)
+swingLen = input.int(5, "Swing Lookback")
 
-grpDirection = "Trade Direction"
-allowLong = input.bool(true, title = "Allow Long Trades", group = grpDirection)
-allowShort = input.bool(true, title = "Allow Short Trades", group = grpDirection)
+// Direction
+doLongs = input.bool(true, "Long Trades")
+doShorts = input.bool(true, "Short Trades")
 
-grpOR = "Opening Range"
-orSession = input.session("1530-1545", title = "Opening Range Session", group = grpOR)
-tz = input.string("UTC+1", title = "Timezone", group = grpOR, options = ["UTC-10", "UTC-8", "UTC-7", "UTC-6", "UTC-5", "UTC-4", "UTC-3", "UTC+0", "UTC+1", "UTC+2", "UTC+3", "UTC+4", "UTC+5", "UTC+8", "UTC+9", "UTC+10"])
+// Session - WICHTIG: Stelle diese auf deine OR Zeit ein!
+sessionOR = input.session("1530-1545", "OR Session (15 min)")
+sessionTZ = input.string("UTC+1", "Timezone", options = ["UTC-5", "UTC-4", "UTC+0", "UTC+1", "UTC+2"])
 
-grpStyle = "Style"
-orColor = input.color(#787b86, title = "OR Color", group = grpStyle)
-orFillColor = input.color(color.new(color.blue, 80), title = "OR Fill", group = grpStyle)
-slColor = input.color(color.red, title = "SL Color", group = grpStyle)
-tpColor = input.color(color.green, title = "TP Color", group = grpStyle)
+//═══════════════════════════════════════════════════════════════════════════════
+// SESSION ERKENNUNG
+//═══════════════════════════════════════════════════════════════════════════════
 
-//---------------------------------------------------------------------------------------------------------------------}
-// SESSION DETECTION
-//---------------------------------------------------------------------------------------------------------------------{
+var bool inSession = false
+inSession := not na(time(timeframe.period, sessionOR, sessionTZ))
 
-inOR = not na(time(timeframe.period, orSession, tz))
-orStart = inOR and not inOR[1]
-orEnd = not inOR and inOR[1]
+bool sessionStart = inSession and not inSession[1]
+bool sessionEnd = not inSession and inSession[1]
 
-//---------------------------------------------------------------------------------------------------------------------}
-// VARIABLES
-//---------------------------------------------------------------------------------------------------------------------{
+//═══════════════════════════════════════════════════════════════════════════════
+// OPENING RANGE BERECHNUNG
+//═══════════════════════════════════════════════════════════════════════════════
 
-var float orHigh = na
-var float orLow = na
-var float orMid = na
-var bool orDone = false
-var bool canEnterLong = false
-var bool canEnterShort = false
+var float ORH = na
+var float ORL = na  
+var float ORM = na
+var bool ORReady = false
+var int ORBar = na
 
-var box orBox = na
-var line hLine = na
-var line lLine = na
-var line mLine = na
+// Session Start - Reset
+if sessionStart
+    ORH := high
+    ORL := low
+    ORReady := false
+    ORBar := bar_index
 
-atr = ta.atr(atrLength)
+// Während Session - Update High/Low
+if inSession
+    ORH := math.max(nz(ORH, high), high)
+    ORL := math.min(nz(ORL, low), low)
 
-//---------------------------------------------------------------------------------------------------------------------}
-// OPENING RANGE LOGIC
-//---------------------------------------------------------------------------------------------------------------------{
+// Session Ende - OR ist fertig
+if sessionEnd
+    ORM := (ORH + ORL) / 2.0
+    ORReady := true
 
-// Reset at OR start
-if orStart
-    orHigh := high
-    orLow := low
-    orDone := false
-    canEnterLong := false
-    canEnterShort := false
+//═══════════════════════════════════════════════════════════════════════════════
+// ATR & SWING BERECHNUNG
+//═══════════════════════════════════════════════════════════════════════════════
+
+atrVal = ta.atr(atrLen)
+
+// Swing High finden
+pivotHi = ta.pivothigh(high, swingLen, swingLen)
+var float lastSwingHi = na
+if not na(pivotHi)
+    lastSwingHi := pivotHi
+
+// Swing Low finden  
+pivotLo = ta.pivotlow(low, swingLen, swingLen)
+var float lastSwingLo = na
+if not na(pivotLo)
+    lastSwingLo := pivotLo
+
+//═══════════════════════════════════════════════════════════════════════════════
+// ENTRY BEDINGUNGEN
+//═══════════════════════════════════════════════════════════════════════════════
+
+bool noPosition = strategy.position_size == 0
+
+// LONG: Kerze schließt ÜBER ORH
+bool longSignal = ORReady and not inSession and noPosition and close > ORH and close[1] <= ORH
+
+// SHORT: Kerze schließt UNTER ORL
+bool shortSignal = ORReady and not inSession and noPosition and close < ORL and close[1] >= ORL
+
+//═══════════════════════════════════════════════════════════════════════════════
+// STOP LOSS BERECHNUNG
+//═══════════════════════════════════════════════════════════════════════════════
+
+calcLongSL() =>
+    float sl = ORM
+    if slType == "Swing High/Low + ATR"
+        swingL = na(lastSwingLo) ? ORL : lastSwingLo
+        sl := swingL - atrVal * atrMult
+    math.min(sl, ORL - atrVal * 0.25)  // Mindestens unter ORL
+
+calcShortSL() =>
+    float sl = ORM
+    if slType == "Swing High/Low + ATR"
+        swingH = na(lastSwingHi) ? ORH : lastSwingHi
+        sl := swingH + atrVal * atrMult
+    math.max(sl, ORH + atrVal * 0.25)  // Mindestens über ORH
+
+//═══════════════════════════════════════════════════════════════════════════════
+// TRADE AUSFÜHRUNG
+//═══════════════════════════════════════════════════════════════════════════════
+
+if longSignal and doLongs
+    float mySL = calcLongSL()
+    float risk = close - mySL
+    float myTP = close + risk * rrRatio
     
-    // Delete old drawings
-    if not na(orBox)
-        box.delete(orBox[1])
-    if not na(hLine)
-        line.delete(hLine[1])
-        line.delete(lLine[1])
-        line.delete(mLine[1])
+    strategy.entry("L", strategy.long, comment = "Long Entry")
+    strategy.exit("L-Exit", "L", stop = mySL, limit = myTP, comment_profit = "TP", comment_loss = "SL")
+
+if shortSignal and doShorts
+    float mySL = calcShortSL()
+    float risk = mySL - close
+    float myTP = close - risk * rrRatio
     
-    orBox := box.new(bar_index, high, bar_index, low, border_color = orColor, bgcolor = orFillColor)
+    strategy.entry("S", strategy.short, comment = "Short Entry")
+    strategy.exit("S-Exit", "S", stop = mySL, limit = myTP, comment_profit = "TP", comment_loss = "SL")
 
-// Update during OR
-if inOR
-    orHigh := math.max(orHigh, high)
-    orLow := math.min(orLow, low)
-    box.set_top(orBox, orHigh)
-    box.set_bottom(orBox, orLow)
-    box.set_right(orBox, bar_index)
+//═══════════════════════════════════════════════════════════════════════════════
+// VISUALISIERUNG
+//═══════════════════════════════════════════════════════════════════════════════
 
-// Finalize at OR end
-if orEnd
-    orMid := (orHigh + orLow) / 2
-    orDone := true
-    canEnterLong := true
-    canEnterShort := true
-    
-    hLine := line.new(bar_index, orHigh, bar_index + 1, orHigh, color = orColor, width = 2)
-    lLine := line.new(bar_index, orLow, bar_index + 1, orLow, color = orColor, width = 2)
-    mLine := line.new(bar_index, orMid, bar_index + 1, orMid, color = orColor, style = line.style_dashed)
+// OR Session Hintergrund
+bgcolor(inSession ? color.new(color.blue, 85) : na, title = "OR Session")
 
-// Extend lines
-if orDone and not inOR
-    line.set_x2(hLine, bar_index)
-    line.set_x2(lLine, bar_index)
-    line.set_x2(mLine, bar_index)
+// OR Linien
+plot(ORReady and not inSession ? ORH : na, "ORH", color.green, 2, plot.style_linebr)
+plot(ORReady and not inSession ? ORL : na, "ORL", color.red, 2, plot.style_linebr)
+plot(ORReady and not inSession ? ORM : na, "ORM", color.gray, 1, plot.style_linebr)
 
-//---------------------------------------------------------------------------------------------------------------------}
-// SWING DETECTION
-//---------------------------------------------------------------------------------------------------------------------{
+// Entry Signale
+plotshape(longSignal and doLongs, "Long", shape.triangleup, location.belowbar, color.green, size = size.small)
+plotshape(shortSignal and doShorts, "Short", shape.triangledown, location.abovebar, color.red, size = size.small)
 
-swingHi() =>
-    float sh = orHigh
-    for i = swingLookback to 30
-        if high[i] > high[i-1] and high[i] > high[i+1] and high[i] > high[i-2] and high[i] > high[i+2]
-            sh := high[i]
-            break
-    sh
+//═══════════════════════════════════════════════════════════════════════════════
+// INFO BOX
+//═══════════════════════════════════════════════════════════════════════════════
 
-swingLo() =>
-    float sl = orLow
-    for i = swingLookback to 30
-        if low[i] < low[i-1] and low[i] < low[i+1] and low[i] < low[i-2] and low[i] < low[i+2]
-            sl := low[i]
-            break
-    sl
-
-//---------------------------------------------------------------------------------------------------------------------}
-// ENTRY CONDITIONS
-//---------------------------------------------------------------------------------------------------------------------{
-
-// Long: Close above ORH
-longCond = orDone and canEnterLong and not inOR and close > orHigh and close[1] <= orHigh and strategy.position_size == 0
-
-// Short: Close below ORL
-shortCond = orDone and canEnterShort and not inOR and close < orLow and close[1] >= orLow and strategy.position_size == 0
-
-//---------------------------------------------------------------------------------------------------------------------}
-// SL/TP CALCULATION
-//---------------------------------------------------------------------------------------------------------------------{
-
-longSL() =>
-    if slType == "Middle of ORB Range"
-        orMid
-    else
-        math.min(swingLo() - atr * atrMultiplier, orLow - atr * 0.5)
-
-shortSL() =>
-    if slType == "Middle of ORB Range"
-        orMid
-    else
-        math.max(swingHi() + atr * atrMultiplier, orHigh + atr * 0.5)
-
-longTP(entry, sl) =>
-    entry + (entry - sl) * rrRatio
-
-shortTP(entry, sl) =>
-    entry - (sl - entry) * rrRatio
-
-//---------------------------------------------------------------------------------------------------------------------}
-// TRADE EXECUTION
-//---------------------------------------------------------------------------------------------------------------------{
-
-var line slLine = na
-var line tpLine = na
-var label slLab = na
-var label tpLab = na
-
-// LONG TRADE
-if longCond and allowLong
-    float sl = longSL()
-    float tp = longTP(close, sl)
-    
-    strategy.entry("Long", strategy.long)
-    strategy.exit("Long Exit", "Long", stop = sl, limit = tp)
-    
-    canEnterLong := false  // Prevent re-entry
-    
-    // Cleanup old lines
-    line.delete(slLine)
-    line.delete(tpLine)
-    label.delete(slLab)
-    label.delete(tpLab)
-    
-    // Draw new SL/TP
-    slLine := line.new(bar_index, sl, bar_index + 30, sl, color = slColor, style = line.style_dashed, width = 2)
-    tpLine := line.new(bar_index, tp, bar_index + 30, tp, color = tpColor, style = line.style_dashed, width = 2)
-    slLab := label.new(bar_index + 30, sl, "SL: " + str.tostring(sl, format.mintick), style = label.style_label_left, color = color.new(color.black, 100), textcolor = slColor)
-    tpLab := label.new(bar_index + 30, tp, "TP: " + str.tostring(tp, format.mintick) + " (RR:" + str.tostring(rrRatio) + ")", style = label.style_label_left, color = color.new(color.black, 100), textcolor = tpColor)
-
-// SHORT TRADE
-if shortCond and allowShort
-    float sl = shortSL()
-    float tp = shortTP(close, sl)
-    
-    strategy.entry("Short", strategy.short)
-    strategy.exit("Short Exit", "Short", stop = sl, limit = tp)
-    
-    canEnterShort := false  // Prevent re-entry
-    
-    // Cleanup old lines
-    line.delete(slLine)
-    line.delete(tpLine)
-    label.delete(slLab)
-    label.delete(tpLab)
-    
-    // Draw new SL/TP
-    slLine := line.new(bar_index, sl, bar_index + 30, sl, color = slColor, style = line.style_dashed, width = 2)
-    tpLine := line.new(bar_index, tp, bar_index + 30, tp, color = tpColor, style = line.style_dashed, width = 2)
-    slLab := label.new(bar_index + 30, sl, "SL: " + str.tostring(sl, format.mintick), style = label.style_label_left, color = color.new(color.black, 100), textcolor = slColor)
-    tpLab := label.new(bar_index + 30, tp, "TP: " + str.tostring(tp, format.mintick) + " (RR:" + str.tostring(rrRatio) + ")", style = label.style_label_left, color = color.new(color.black, 100), textcolor = tpColor)
-
-//---------------------------------------------------------------------------------------------------------------------}
-// SIGNALS PLOT
-//---------------------------------------------------------------------------------------------------------------------{
-
-plotshape(longCond and allowLong, "Long", shape.triangleup, location.belowbar, color.green, size = size.normal, text = "LONG")
-plotshape(shortCond and allowShort, "Short", shape.triangledown, location.abovebar, color.red, size = size.normal, text = "SHORT")
-
-// OR Session background
-bgcolor(inOR ? color.new(color.blue, 90) : na)
-
-//---------------------------------------------------------------------------------------------------------------------}
-// DEBUG TABLE
-//---------------------------------------------------------------------------------------------------------------------{
-
-var table t = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 70))
+var table infoBox = table.new(position.top_right, 2, 7, bgcolor = color.new(#000000, 70), border_width = 1)
 
 if barstate.islast
-    table.cell(t, 0, 0, "ORB v3", text_color = color.white)
-    table.cell(t, 1, 0, "")
-    table.cell(t, 0, 1, "OR High:", text_color = color.white, text_size = size.small)
-    table.cell(t, 1, 1, str.tostring(orHigh, format.mintick), text_color = color.green, text_size = size.small)
-    table.cell(t, 0, 2, "OR Low:", text_color = color.white, text_size = size.small)
-    table.cell(t, 1, 2, str.tostring(orLow, format.mintick), text_color = color.red, text_size = size.small)
-    table.cell(t, 0, 3, "OR Mid:", text_color = color.white, text_size = size.small)
-    table.cell(t, 1, 3, str.tostring(orMid, format.mintick), text_color = color.gray, text_size = size.small)
-    table.cell(t, 0, 4, "OR Done:", text_color = color.white, text_size = size.small)
-    table.cell(t, 1, 4, str.tostring(orDone), text_color = orDone ? color.green : color.red, text_size = size.small)
-    table.cell(t, 0, 5, "In OR:", text_color = color.white, text_size = size.small)
-    table.cell(t, 1, 5, str.tostring(inOR), text_color = inOR ? color.orange : color.gray, text_size = size.small)
-    table.cell(t, 0, 6, "Position:", text_color = color.white, text_size = size.small)
-    table.cell(t, 1, 6, str.tostring(strategy.position_size, "#.##"), text_color = color.white, text_size = size.small)
-    table.cell(t, 0, 7, "Trades:", text_color = color.white, text_size = size.small)
-    table.cell(t, 1, 7, str.tostring(strategy.closedtrades), text_color = color.yellow, text_size = size.small)
+    table.cell(infoBox, 0, 0, "ORB v4", text_color = color.white, text_size = size.normal)
+    table.cell(infoBox, 1, 0, "", text_color = color.white)
+    
+    table.cell(infoBox, 0, 1, "ORH:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 1, str.tostring(ORH, format.mintick), text_color = color.green, text_size = size.small)
+    
+    table.cell(infoBox, 0, 2, "ORL:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 2, str.tostring(ORL, format.mintick), text_color = color.red, text_size = size.small)
+    
+    table.cell(infoBox, 0, 3, "ORM:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 3, str.tostring(ORM, format.mintick), text_color = color.gray, text_size = size.small)
+    
+    table.cell(infoBox, 0, 4, "SL Type:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 4, slType == "Middle of ORB Range" ? "ORM" : "Swing+ATR", text_color = color.orange, text_size = size.small)
+    
+    table.cell(infoBox, 0, 5, "R:R:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 5, str.tostring(rrRatio), text_color = color.yellow, text_size = size.small)
+    
+    table.cell(infoBox, 0, 6, "Trades:", text_color = color.white, text_size = size.small)
+    table.cell(infoBox, 1, 6, str.tostring(strategy.closedtrades + strategy.opentrades), text_color = color.aqua, text_size = size.small)
 
-//---------------------------------------------------------------------------------------------------------------------}
+//═══════════════════════════════════════════════════════════════════════════════
 // ALERTS
-//---------------------------------------------------------------------------------------------------------------------{
+//═══════════════════════════════════════════════════════════════════════════════
 
-alertcondition(longCond and allowLong, "Long Entry", "ORB Long Breakout!")
-alertcondition(shortCond and allowShort, "Short Entry", "ORB Short Breakout!")
-
-//---------------------------------------------------------------------------------------------------------------------}
+alertcondition(longSignal, "Long Signal", "ORB Long Breakout!")
+alertcondition(shortSignal, "Short Signal", "ORB Short Breakout!")
